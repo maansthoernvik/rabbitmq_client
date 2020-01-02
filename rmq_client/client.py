@@ -1,24 +1,37 @@
-from kombu import Connection
-
-from subscriber import Subscriber
-from publisher import Publisher
+from .consumer import RMQConsumer
+from .producer import RMQProducer
 
 
 class RMQClient:
+    """
+    Class RMQClient
 
-    subscriber = None
-    publisher = None
+    Handles connection to RabbitMQ and provides and interface for applications
+    wanting to either publish
+    """
 
-    def __init__(self, connection_string):
-        self._connection_string = connection_string
-        self.subscriber = Subscriber(Connection(self._connection_string))
-        self.publisher = Publisher(self._connection_string)
+    _consumer: RMQConsumer
+    _producer: RMQProducer
 
-    def publish(self, topic, routing_key, message):
-        self.publisher.publish(topic, routing_key, message)
+    def __init__(self):
+        print("client __init__")
+        self._consumer = RMQConsumer()
+        self._producer = RMQProducer()
 
-    def subscribe(self, topic, routing_key, callback):
-        self.subscriber.subscribe(topic, routing_key, callback)
+    def start(self):
+        print("client start()")
+        self._consumer.start()
+        self._producer.start()
 
-    def start_consuming(self):
-        self.subscriber.start_consuming()
+    def stop(self):
+        print("client stop()")
+        self._consumer.stop()
+        self._producer.stop()
+
+    def subscribe(self):
+        # dynamically add a subscription to a topic
+        pass
+
+    def publish(self):
+        # publishes a message to the provided topic
+        pass
