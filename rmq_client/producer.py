@@ -1,15 +1,15 @@
 from .connection import RMQConnection
+from multiprocessing import Process
 
 
 class RMQProducer:
-    _connection: RMQConnection
+    _process: Process
 
     def __init__(self):
-        self._connection = RMQConnection()
+        pass
 
     def start(self):
-        self._connection.connect()
+        connection = RMQConnection()
 
-    def stop(self):
-        self._connection.terminate()
-
+        self._process = Process(target=connection.connect)
+        self._process.start()

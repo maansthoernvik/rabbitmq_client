@@ -16,17 +16,12 @@ class RMQClient:
     def __init__(self):
         print("client __init__")
         self._consumer = RMQConsumer()
-        self._producer = RMQProducer()
+        #self._producer = RMQProducer()
 
     def start(self):
         print("client start()")
         self._consumer.start()
-        self._producer.start()
-
-    def stop(self):
-        print("client stop()")
-        self._consumer.stop()
-        self._producer.stop()
+        #self._producer.start()
 
     def subscribe(self):
         # dynamically add a subscription to a topic
