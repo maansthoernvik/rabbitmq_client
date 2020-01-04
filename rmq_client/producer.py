@@ -26,12 +26,11 @@ class RMQProducer:
                                            args=(self._work_queue,))
         self._connection_process.start()
 
-    def publish(self, exchange, routing_key):
+    def publish(self, topic, message):
         """
-        Publishes a message on the supplied exchange with the provided
-        routing_key.
+        Publishes a message on the supplied topic.
 
-        :param exchange:
-        :param routing_key:
+        :param topic:
+        :param message:
         """
         pass

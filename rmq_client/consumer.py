@@ -2,6 +2,7 @@ from enum import Enum
 from multiprocessing import Queue as IPCQueue, Process
 from threading import Thread
 
+from .defs import Subscription, Message
 from .consumer_connection import create_consumer_connection
 
 
@@ -62,7 +63,7 @@ class RMQConsumer:
         self.handle_message(message)
         self.consume()
 
-    def handle_message(self, message):
+    def handle_message(self, message: Message):
         """
         Defines handling for a received message, dispatches the message contents
         to registered callbacks.
@@ -70,6 +71,7 @@ class RMQConsumer:
         :param message:
         """
         print("consumer got message: {}".format(message))
+        self._topic_callbacks.get(message.topic)(message.message_content)
 
     def stop(self):
         """
@@ -78,17 +80,17 @@ class RMQConsumer:
         print("consumer stop()")
         self._connection_process.terminate()
 
-    def subscribe(self, topic, routing_key, callback):
+    def subscribe(self, topic, callback):
         """
-        Subscribes to messages sent to the named topic and routing_key. Messages
-        received on this topic and routing_key will be dispatched to the
-        provided callback.
+        Subscribes to messages sent to the named topic. Messages received on
+        this topic will be dispatched to the provided callback.
 
         :param topic:
-        :param routing_key:
         :param callback:
         """
         # 1. Add callback to be called when event on that topic + routing_key
         # 2. Request a subscription on the new topic towards the consumer
         #    connection
-        pass
+        print("consumer subscribe()")
+        self._work_queue.put(Subscription(topic=topic))
+        self._topic_callbacks.update({topic: callback})

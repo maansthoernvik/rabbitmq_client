@@ -23,12 +23,12 @@ class RMQClient:
         self._consumer.start()
         self._producer.start()
 
-    def subscribe(self):
+    def subscribe(self, topic, callback):
         print("client subscribe()")
         # dynamically add a subscription to a topic
-        pass
+        self._consumer.subscribe(topic, callback)
 
-    def publish(self):
+    def publish(self, topic, message):
         print("client publish()")
         # publishes a message to the provided topic
-        pass
+        self._producer.publish(topic, message)

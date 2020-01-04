@@ -62,11 +62,7 @@ class RMQConnection(metaclass=ABCMeta):
 
     def disconnect(self):
         """
-        NOTE: NOT THREADSAFE! SHALL ONLY BE CALLED FROM THE CONNECTION PROCESS.
-        OUTSIDE PROCESSES SHALL USE THE NO-ARG TERMINATE INTERFACE METHOD TO
-        CANCEL THE CONNECTION.
-
-        :return:
+        Starts disconnecting from the RabbitMQ server.
         """
         print("closing connection")
         self._connection.close()

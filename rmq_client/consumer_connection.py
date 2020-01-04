@@ -4,6 +4,7 @@ import functools
 from threading import Thread
 from multiprocessing import Queue as IPCQueue
 
+from .defs import Subscription, EXCHANGE_TYPE_FANOUT, Message
 from .connection import RMQConnection
 
 
@@ -85,7 +86,94 @@ class RMQConsumerConnection(RMQConnection):
         self.monitor_work_queue()
 
     def handle_work(self, work):
+        """
+
+        :param work:
+        """
         print("consumer connection got work: {}".format(work))
+        if isinstance(work, Subscription):
+            self.handle_subscription(work)
+
+    def handle_subscription(self, subscription):
+        """
+
+        :param topic:
+        """
+        print("consumer connection handle_subscription()")
+        cb = functools.partial(self.on_exchange_declared,
+                               exchange_name=subscription.topic)
+        self._channel.exchange_declare(exchange=subscription.topic,
+                                       exchange_type=EXCHANGE_TYPE_FANOUT,
+                                       callback=cb)
+
+    def on_exchange_declared(self, _frame, exchange_name=None):
+        """
+
+        :param exchange_name:
+        :param _frame:
+        """
+        print("consumer connection on_exchange_declared(), exchange name: {}".format(exchange_name))
+        print("exchange declared message frame: {}".format(_frame))
+        cb = functools.partial(self.on_queue_declared,
+                               exchange_name=exchange_name)
+        self._channel.queue_declare(queue="", callback=cb)
+
+    def on_queue_declared(self, frame, exchange_name=None):
+        """
+
+        :param frame:
+        :param exchange_name:
+        """
+        print("consumer connection on_queue_declared(), queue name: {}".format(frame.method.queue))
+        print("queue declared message frame: {}".format(frame))
+        cb = functools.partial(self.on_queue_bound,
+                               exchange_name=exchange_name,
+                               queue_name=frame.method.queue)
+        self._channel.queue_bind(
+            frame.method.queue, exchange_name, callback=cb
+        )
+
+    def on_queue_bound(self, _frame, exchange_name=None, queue_name=None):
+        """
+
+        :param _frame:
+        """
+        print("consumer connection on_queue_bound()")
+        print("queue bound message frame: {}".format(_frame))
+        print("bound queue {} to exchange {}".format(queue_name, exchange_name))
+        self.consume(queue_name)
+
+    def consume(self, queue_name):
+        """
+
+        :param queue_name:
+        """
+        print("consumer connection consume()")
+        self._channel.add_on_cancel_callback(self.on_consumer_cancelled)
+        self._channel.basic_consume(queue_name, self.on_message)
+
+    def on_message(self, _channel, basic_deliver, properties, body):
+        """
+
+        :param _channel:
+        :param basic_deliver:
+        :param properties:
+        :param body:
+        """
+        print("consumer connection on_message()")
+        print("message basic.deliver method: {}".format(basic_deliver))
+        print("message properties: {}". format(properties))
+        print("message body: {}".format(body))
+        self._consumed_messages.put(Message("test", body))
+
+        self._channel.basic_ack(basic_deliver.delivery_tag)
+
+    def on_consumer_cancelled(self, _frame):
+        """
+
+        :param _frame:
+        """
+        print("consumer connection on_consumer_cancelled()")
 
     def interrupt(self, _signum, _frame):
         """
