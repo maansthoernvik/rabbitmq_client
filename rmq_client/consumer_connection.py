@@ -1,5 +1,7 @@
 import signal
+import functools
 
+from threading import Thread
 from multiprocessing import Queue as IPCQueue
 
 from .connection import RMQConnection
@@ -23,6 +25,8 @@ def create_consumer_connection(work_queue, consumed_messages):
 
 
 class RMQConsumerConnection(RMQConnection):
+
+    _channel = None
 
     _work_queue: IPCQueue
     _consumed_messages: IPCQueue
@@ -55,7 +59,32 @@ class RMQConsumerConnection(RMQConnection):
 
         :param _connection: established connection
         """
-        print("Connection open")
+        print("consumer connection open")
+        self._connection.channel(on_open_callback=self.on_channel_open)
+
+    def on_channel_open(self, channel):
+        print("consumer connection channel open")
+        self._channel = channel
+        self._channel.add_on_close_callback(self.on_channel_closed)
+
+        self.consumer_connection_started()
+
+    def on_channel_closed(self, channel, reason):
+        print("channel {} closed for reason: {}".format(channel, reason))
+
+    def consumer_connection_started(self):
+        print("consumer connection started")
+        thread = Thread(target=self.monitor_work_queue, daemon=True)
+        thread.start()
+
+    def monitor_work_queue(self):
+        print("consumer connection monitoring work queue")
+        work = self._work_queue.get()
+        self.handle_work(work)
+        self.monitor_work_queue()
+
+    def handle_work(self, work):
+        print("consumer connection got work: {}".format(work))
 
     def interrupt(self, _signum, _frame):
         """
