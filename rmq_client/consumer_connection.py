@@ -45,6 +45,7 @@ class RMQConsumerConnection(RMQConnection):
                                   received for a subscribed topic to the
                                   controlling process
         """
+        print("consumer connection __init__")
         self._work_queue = work_queue
         self._consumed_messages = consumed_messages
 
@@ -70,7 +71,7 @@ class RMQConsumerConnection(RMQConnection):
         self.consumer_connection_started()
 
     def on_channel_closed(self, channel, reason):
-        print("channel {} closed for reason: {}".format(channel, reason))
+        print("consumer connection channel {} closed for reason: {}".format(channel, reason))
 
     def consumer_connection_started(self):
         print("consumer connection started")
@@ -94,6 +95,7 @@ class RMQConsumerConnection(RMQConnection):
         :param _frame: current stack frame
         :return: None
         """
+        print("consumer connection interrupt")
         self._closing = True
         self.disconnect()
 
@@ -105,5 +107,6 @@ class RMQConsumerConnection(RMQConnection):
         :param _frame: current stack frame
         :return: None
         """
+        print("consumer connection terminate")
         self._closing = True
         self.disconnect()
