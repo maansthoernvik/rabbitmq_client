@@ -17,7 +17,7 @@ class RMQConsumer:
 
     def __init__(self):
         self._topic_callbacks = dict()
-        
+
         self._work_queue = IPCQueue()
         self._consumed_messages = IPCQueue()
 
@@ -43,6 +43,7 @@ class RMQConsumer:
         self._connection_process.terminate()
 
     def subscribe(self, topic, routing_key, callback):
-        # 1. Add topic + routing_key to list of topics to consume on
-        # 2. Add callback to be called when event on that topic + routing_key
+        # 1. Add callback to be called when event on that topic + routing_key
+        # 2. Request a subscription on the new topic towards the consumer
+        #    connection
         pass
