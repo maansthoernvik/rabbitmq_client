@@ -5,6 +5,11 @@ from .producer_connection import create_producer_connection
 
 
 class RMQProducer:
+    """
+    Class RMQProducer
+
+    Interface for producer-related operations towards a RabbitMQ server.
+    """
 
     _connection_process: Process
 
@@ -20,7 +25,10 @@ class RMQProducer:
     def start(self):
         """
         Starts the producer's connection process in order to be able to publish
-        messages.
+        messages. The connection process is maintained in another process, the
+        work queue passed along to the new process is process shared to allow
+        for the controlling process to issue commands to the connection process,
+        for example to publish messages.
         """
         print("producer start()")
         self._connection_process = Process(target=create_producer_connection,
@@ -31,8 +39,8 @@ class RMQProducer:
         """
         Publishes a message on the supplied topic.
 
-        :param topic:
-        :param message:
+        :param str topic: topic to publish on
+        :param str message: message content
         """
         print("producer publish()")
         self._work_queue.put(Publish(message, topic=topic))

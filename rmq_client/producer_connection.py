@@ -23,6 +23,14 @@ def create_producer_connection(work_queue):
 
 
 class RMQProducerConnection(RMQConnection):
+    """
+    Class RMQProducerConnection
+
+    This class handles a connection to a RabbitMQ server intended for a producer
+    entity. Messages to be published are posted to a process shared queue which
+    is read continuously by a connection process-local thread assigned to
+    monitoring the queue.
+    """
 
     _channel = None
 
@@ -33,8 +41,8 @@ class RMQProducerConnection(RMQConnection):
         Initializes the RMQProducerConnection's work queue and binds signal
         handlers. The work queue can be used to issue commands.
 
-        :param work_queue: process shared queue used to issue work for the
-                         consumer connection
+        :param IPCQueue work_queue: process shared queue used to issue work for
+                                    the consumer connection
         """
         print("producer connection __init__")
         self._work_queue = work_queue
@@ -48,12 +56,17 @@ class RMQProducerConnection(RMQConnection):
         """
         Callback when a connection has been established to the RMQ server.
 
-        :param _connection: established connection
+        :param pika.SelectConnection _connection: established connection
         """
         print("producer connection open")
         self._connection.channel(on_open_callback=self.on_channel_open)
 
     def on_channel_open(self, channel):
+        """
+        Callback for when a channel has been established on the connection.
+
+        :param pika.channel.Channel channel: the opened channel
+        """
         print("producer connection channel open")
         self._channel = channel
         self._channel.add_on_close_callback(self.on_channel_closed)
@@ -61,16 +74,34 @@ class RMQProducerConnection(RMQConnection):
         self.producer_connection_started()
 
     def on_channel_closed(self, channel, reason):
+        """
+        Callback for when a channel has been closed.
+
+        :param pika.channel.Channel channel: the channel that was closed
+        :param Exception reason: exception explaining why the channel was closed
+        """
         print("producer connection channel {} closed for reason: {}".format(channel, reason))
 
     def producer_connection_started(self):
+        """
+        Shall be called when the producer connection has reached a state where
+        it is ready to receive and execute work, for instance to publish
+        messages.
+        """
         print("producer connection started")
         thread = Thread(target=self.monitor_work_queue, daemon=True)
         thread.start()
 
     def monitor_work_queue(self):
         """
+        NOTE!
 
+        This function should live in its own thread so that the
+        RMQProducerConnection is able to respond to incoming work as quickly as
+        possible.
+
+        Monitors the producer connection's work queue and executes from it as
+        soon as work is available.
         """
         print("producer connection monitoring work queue")
         work = self._work_queue.get()
@@ -79,33 +110,39 @@ class RMQProducerConnection(RMQConnection):
 
     def handle_work(self, work):
         """
+        Handler for work posted on the work_queue, dispatches the work depending
+        on the type of work.
 
-        :param work:
+        :param Publish work: incoming work to be handled
         """
         print("producer connection got work: {}".format(work))
 
         if isinstance(work, Publish):
             self.handle_publish(work)
 
-    def handle_publish(self, work: Publish):
+    def handle_publish(self, publish: Publish):
         """
+        Handler for publishing work.
 
-        :param work:
+        :param Publish publish: information about a publish
         """
         print("producer connection handle_publish()")
         cb = functools.partial(self.on_exchange_declared,
-                               exchange_name=work.topic,
-                               message_content=work.message_content)
-        self._channel.exchange_declare(exchange=work.topic,
+                               exchange_name=publish.topic,
+                               message_content=publish.message_content)
+        self._channel.exchange_declare(exchange=publish.topic,
                                        exchange_type=EXCHANGE_TYPE_FANOUT,
                                        callback=cb)
 
     def on_exchange_declared(self, _frame, exchange_name=None, message_content=None):
         """
+        Callback for when an exchange has been declared.
 
-        :param _frame:
-        :param exchange_name:
-        :param message_content:
+        :param pika.frame.Method _frame: message frame
+        :param str exchange_name: additional parameter from functools.partial,
+                                  used to carry the exchange_name
+        :param str message_content: additional parameter from functools.partial,
+                                    used to carry the message_content
         """
         print("producer connection on_exchange_declared(), exchange name: {}".format(exchange_name))
         print("exchange declared message frame: {}".format(_frame))
@@ -114,9 +151,10 @@ class RMQProducerConnection(RMQConnection):
 
     def publish(self, exchange_name, message_content):
         """
+        Publish the message to the named exchange.
 
-        :param exchange_name:
-        :param message_content:
+        :param str exchange_name: name of exchange to publish to
+        :param str message_content: content of message to publish
         """
         print("producer connection publish()")
         self._channel.basic_publish(exchange=exchange_name,
@@ -125,11 +163,10 @@ class RMQProducerConnection(RMQConnection):
 
     def interrupt(self, _signum, _frame):
         """
-        Signal handler for signal.SIGINT
+        Signal handler for signal.SIGINT.
 
-        :param _signum: signal.SIGINT
-        :param _frame: current stack frame
-        :return: None
+        :param int _signum: signal.SIGINT
+        :param ??? _frame: current stack frame
         """
         print("producer connection interrupt")
         self._closing = True
@@ -137,11 +174,10 @@ class RMQProducerConnection(RMQConnection):
 
     def terminate(self, _signum, _frame):
         """
-        Signal handler for signal.SIGTERM
+        Signal handler for signal.SIGTERM.
 
-        :param _signum: signal.SIGTERM
-        :param _frame: current stack frame
-        :return: None
+        :param int _signum: signal.SIGTERM
+        :param ??? _frame: current stack frame
         """
         print("producer connection terminate")
         self._closing = True
