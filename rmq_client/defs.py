@@ -8,6 +8,9 @@ class Subscription:
     def __init__(self, topic=""):
         self.topic = topic
 
+    def __str__(self):
+        return "{} {}".format(self.__class__, self.__dict__)
+
 
 class Message:
 

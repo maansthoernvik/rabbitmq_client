@@ -116,7 +116,7 @@ class RMQConsumerConnection(RMQConnection):
         print("exchange declared message frame: {}".format(_frame))
         cb = functools.partial(self.on_queue_declared,
                                exchange_name=exchange_name)
-        self._channel.queue_declare(queue="", callback=cb)
+        self._channel.queue_declare(queue="", exclusive=True, callback=cb)
 
     def on_queue_declared(self, frame, exchange_name=None):
         """
@@ -137,6 +137,8 @@ class RMQConsumerConnection(RMQConnection):
         """
 
         :param _frame:
+        :param exchange_name:
+        :param queue_name:
         """
         print("consumer connection on_queue_bound()")
         print("queue bound message frame: {}".format(_frame))
@@ -150,7 +152,7 @@ class RMQConsumerConnection(RMQConnection):
         """
         print("consumer connection consume()")
         self._channel.add_on_cancel_callback(self.on_consumer_cancelled)
-        self._channel.basic_consume(queue_name, self.on_message)
+        self._channel.basic_consume(queue_name, self.on_message, exclusive=True)
 
     def on_message(self, _channel, basic_deliver, properties, body):
         """
