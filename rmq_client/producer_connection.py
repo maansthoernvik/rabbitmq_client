@@ -71,6 +71,19 @@ class RMQProducerConnection(RMQConnection):
         self._channel = channel
         self._channel.add_on_close_callback(self.on_channel_closed)
 
+        self._channel.confirm_delivery(
+            ack_nack_callback=self.on_delivery_confirmed,
+            callback=self.on_confirm_mode_activated
+        )
+
+    def on_confirm_mode_activated(self, _frame):
+        """
+        Callback for when confirm mode has been activated.
+
+        :param pika.frame.Method _frame: message frame
+        """
+        print("producer connection on_confirm_mode_activated()")
+        print("Confirm.SelectOK: {}".format(_frame))
         self.producer_connection_started()
 
     def on_channel_closed(self, channel, reason):
@@ -133,6 +146,15 @@ class RMQProducerConnection(RMQConnection):
         self._channel.exchange_declare(exchange=publish.topic,
                                        exchange_type=EXCHANGE_TYPE_FANOUT,
                                        callback=cb)
+
+    def on_delivery_confirmed(self, frame):
+        """
+        Callback for when a publish is confirmed
+
+        :param pika.frame.Method frame: message frame
+        """
+        print("producer connection on_delivery_confirmed()")
+        print("delivery confirmed frame: {}".format(frame))
 
     def on_exchange_declared(self, _frame, exchange_name=None, message_content=None):
         """
