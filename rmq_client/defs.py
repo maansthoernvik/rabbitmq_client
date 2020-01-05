@@ -38,3 +38,6 @@ class Message:
     def __init__(self, topic, message_content):
         self.topic = topic
         self.message_content = message_content
+
+    def __str__(self):
+        return "{} {}".format(self.__class__, self.__dict__)

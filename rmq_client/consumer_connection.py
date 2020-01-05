@@ -166,7 +166,7 @@ class RMQConsumerConnection(RMQConnection):
         print("message basic.deliver method: {}".format(basic_deliver))
         print("message properties: {}". format(properties))
         print("message body: {}".format(body))
-        self._consumed_messages.put(Message("test", body))
+        self._consumed_messages.put(Message(basic_deliver.exchange, body))
 
         self._channel.basic_ack(basic_deliver.delivery_tag)
 

@@ -92,5 +92,5 @@ class RMQConsumer:
         # 2. Request a subscription on the new topic towards the consumer
         #    connection
         print("consumer subscribe()")
-        self._work_queue.put(Subscription(topic=topic))
         self._topic_callbacks.update({topic: callback})
+        self._work_queue.put(Subscription(topic=topic))
