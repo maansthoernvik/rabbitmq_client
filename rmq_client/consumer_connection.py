@@ -15,17 +15,27 @@ def create_consumer_connection(work_queue, consumed_messages):
     instantiate the RMQConsumerConnection outside of the new process' memory
     context.
 
-    :param work_queue: process shared queue used to issue work for the
-                       consumer connection
-    :param consumed_messages: process shared queue used to forward messages
-                              received for a subscribed topic to the
-                              controlling process
+    :param IPCQueue work_queue: process shared queue used to issue work for the
+                                consumer connection
+    :param IPCQueue consumed_messages: process shared queue used to forward
+                                       messages received for a subscribed topic
+                                       to the controlling process
     """
     consumer_connection = RMQConsumerConnection(work_queue, consumed_messages)
     consumer_connection.connect()
 
 
 class RMQConsumerConnection(RMQConnection):
+    """
+    Class RMQConsumerConnection
+
+    Specific connection implementation for RMQ Consumers. This class ensures:
+    1. handling of channels according to what is needed for a RabbitMQ consumer.
+    2. listening on a process shared work queue where work can be posted towards
+       the RMQ consumer connection, for example to subscribe to a new topic.
+    3. posting consumed messages to a process shared queue so that incoming
+       messages can be read and handled by the controlling process.
+    """
 
     _channel = None
 
@@ -59,12 +69,17 @@ class RMQConsumerConnection(RMQConnection):
         """
         Callback when a connection has been established to the RMQ server.
 
-        :param _connection: established connection
+        :param pika.SelectConnection _connection: established connection
         """
         print("consumer connection open")
         self._connection.channel(on_open_callback=self.on_channel_open)
 
     def on_channel_open(self, channel):
+        """
+        Callback for when a channel has been established on the connection.
+
+        :param pika.channel.Channel channel: the opened channel
+        """
         print("consumer connection channel open")
         self._channel = channel
         self._channel.add_on_close_callback(self.on_channel_closed)
@@ -72,23 +87,47 @@ class RMQConsumerConnection(RMQConnection):
         self.consumer_connection_started()
 
     def on_channel_closed(self, channel, reason):
-        print("consumer connection channel {} closed for reason: {}".format(channel, reason))
+        """
+        Callback for when a channel has been closed.
+
+        :param pika.channel.Channel channel: the channel that was closed
+        :param Exception reason: exception explaining why the channel was closed
+        """
+        print("consumer connection channel {} closed for reason: {}".format(
+            channel, reason))
 
     def consumer_connection_started(self):
+        """
+        Shall be called when the consumer connection has been established to the
+        point where it is ready to receive work from its controlling process.
+        In this case, when a channel has been established.
+        """
         print("consumer connection started")
         thread = Thread(target=self.monitor_work_queue, daemon=True)
         thread.start()
 
     def monitor_work_queue(self):
+        """
+        NOTE!
+
+        This function should live in its own thread so that the
+        RMQConsumerConnection is able to respond to incoming work as quickly as
+        possible.
+
+        Monitors the consumer connection's work queue and executes from it as
+        soon as work is available.
+        """
         print("consumer connection monitoring work queue")
-        work = self._work_queue.get()
+        work = self._work_queue.get()  # Blocking, set block=false to not
         self.handle_work(work)
-        self.monitor_work_queue()
+        self.monitor_work_queue()  # Recursive call
 
     def handle_work(self, work):
         """
+        Handler for work posted on the work_queue, dispatches the work depending
+        on the type of work.
 
-        :param work:
+        :param Subscription work: incoming work to be handled
         """
         print("consumer connection got work: {}".format(work))
         if isinstance(work, Subscription):
@@ -96,8 +135,9 @@ class RMQConsumerConnection(RMQConnection):
 
     def handle_subscription(self, subscription: Subscription):
         """
+        Handler for subscription work.
 
-        :param subscription:
+        :param Subscription subscription: information about a subscription
         """
         print("consumer connection handle_subscription()")
         cb = functools.partial(self.on_exchange_declared,
@@ -108,11 +148,15 @@ class RMQConsumerConnection(RMQConnection):
 
     def on_exchange_declared(self, _frame, exchange_name=None):
         """
+        Callback for when an exchange has been declared.
 
-        :param exchange_name:
-        :param _frame:
+        :param pika.frame.Method _frame: message frame
+        :param str exchange_name: additional parameter from functools.partial,
+                                  used to carry the exchange_name
         """
-        print("consumer connection on_exchange_declared(), exchange name: {}".format(exchange_name))
+        print(
+            "consumer connection on_exchange_declared(), exchange name: {}".format(
+                exchange_name))
         print("exchange declared message frame: {}".format(_frame))
         cb = functools.partial(self.on_queue_declared,
                                exchange_name=exchange_name)
@@ -120,11 +164,14 @@ class RMQConsumerConnection(RMQConnection):
 
     def on_queue_declared(self, frame, exchange_name=None):
         """
+        Callback for when a queue has been declared.
 
-        :param frame:
-        :param exchange_name:
+        :param pika.frame.Method frame: message frame
+        :param str exchange_name: additional parameter from functools.partial,
+                                  used to carry the exchange_name
         """
-        print("consumer connection on_queue_declared(), queue name: {}".format(frame.method.queue))
+        print("consumer connection on_queue_declared(), queue name: {}".format(
+            frame.method.queue))
         print("queue declared message frame: {}".format(frame))
         cb = functools.partial(self.on_queue_bound,
                                exchange_name=exchange_name,
@@ -135,10 +182,13 @@ class RMQConsumerConnection(RMQConnection):
 
     def on_queue_bound(self, _frame, exchange_name=None, queue_name=None):
         """
+        Callback for when a queue has been bound to an exchange.
 
-        :param _frame:
-        :param exchange_name:
-        :param queue_name:
+        :param pika.frame.Method _frame: message frame
+        :param str exchange_name: additional parameter from functools.partial,
+                                  used to carry the exchange_name
+        :param str queue_name: additional parameter from functools.partial, used
+                               to carry the exchange_name
         """
         print("consumer connection on_queue_bound()")
         print("queue bound message frame: {}".format(_frame))
@@ -147,8 +197,9 @@ class RMQConsumerConnection(RMQConnection):
 
     def consume(self, queue_name):
         """
+        Starts consuming on the parameter queue.
 
-        :param queue_name:
+        :param str queue_name: name of the queue to consume from
         """
         print("consumer connection consume()")
         self._channel.add_on_cancel_callback(self.on_consumer_cancelled)
@@ -156,15 +207,16 @@ class RMQConsumerConnection(RMQConnection):
 
     def on_message(self, _channel, basic_deliver, properties, body):
         """
+        Callback for when a message is received on a consumed queue.
 
-        :param _channel:
-        :param basic_deliver:
-        :param properties:
-        :param body:
+        :param _channel: channel that the message was received on
+        :param pika.spec.Basic.Deliver basic_deliver: method
+        :param pika.spec.BasicProperties properties: properties of the message
+        :param bytes body: message body
         """
         print("consumer connection on_message()")
         print("message basic.deliver method: {}".format(basic_deliver))
-        print("message properties: {}". format(properties))
+        print("message properties: {}".format(properties))
         print("message body: {}".format(body))
         self._consumed_messages.put(Message(basic_deliver.exchange, body))
 
@@ -172,18 +224,18 @@ class RMQConsumerConnection(RMQConnection):
 
     def on_consumer_cancelled(self, _frame):
         """
+        Callback for when a consumer is cancelled by the RMQ server.
 
-        :param _frame:
+        :param pika.frame.Method _frame: message frame
         """
         print("consumer connection on_consumer_cancelled()")
 
     def interrupt(self, _signum, _frame):
         """
-        Signal handler for signal.SIGINT
+        Signal handler for signal.SIGINT.
 
-        :param _signum: signal.SIGINT
-        :param _frame: current stack frame
-        :return: None
+        :param int _signum: signal.SIGINT
+        :param ??? _frame: current stack frame
         """
         print("consumer connection interrupt")
         self._closing = True
@@ -191,11 +243,10 @@ class RMQConsumerConnection(RMQConnection):
 
     def terminate(self, _signum, _frame):
         """
-        Signal handler for signal.SIGTERM
+        Signal handler for signal.SIGTERM.
 
-        :param _signum: signal.SIGTERM
-        :param _frame: current stack frame
-        :return: None
+        :param int _signum: signal.SIGTERM
+        :param ??? _frame: current stack frame
         """
         print("consumer connection terminate")
         self._closing = True

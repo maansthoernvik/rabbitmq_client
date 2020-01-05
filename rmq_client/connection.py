@@ -4,6 +4,19 @@ from abc import ABCMeta, abstractmethod
 
 
 class RMQConnection(metaclass=ABCMeta):
+    """
+    Class RMQConnection
+
+    Abstract class implementing the basics of a RabbitMQ server connection. This
+    class does not meddle with channels as the handling of a channel may differ
+    between consumers and producers. The RMQConnection class therefore only
+    handles the connection (pika.SelectConnection) object itself.
+
+    Subclasses inheriting from RMQConnection have to override the
+    on_connection_open(connection: SelectConnection) function to take over once
+    the connection has been established. At this point, it is possible to start
+    creating channels.
+    """
 
     _connection_parameters: pika.ConnectionParameters
     _connection: pika.SelectConnection
@@ -13,7 +26,8 @@ class RMQConnection(metaclass=ABCMeta):
 
     def __init__(self):
         """
-        Initializes the RMQ connection with connection parameters.
+        Initializes the RMQ connection with connection parameters and the
+        general state of the RMQConnection adapter.
         """
         self._connection_parameters = pika.ConnectionParameters()
 
@@ -29,19 +43,19 @@ class RMQConnection(metaclass=ABCMeta):
     def connect(self):
         """
         Initiates the connection to the RabbitMQ server by starting the
-        connection's IO-loop.
-
-        :return: None
+        connection's IO-loop. Starting the IO-loop will connect to the RabbitMQ
+        server as configured in __init__.
         """
         self._connection.ioloop.start()
 
     @abstractmethod
     def on_connection_open(self, _connection):
         """
-        Callback upon opened connection.
+        Callback upon opened connection. Subclasses shall override this function
+        in order to be notified when a connection has been established in order
+        for them to know when they are able to create channels.
 
-        :param _connection: connection that was opened.
-        :return: None
+        :param pika.SelectConnection _connection: connection that was opened
         """
         pass
 
@@ -49,9 +63,8 @@ class RMQConnection(metaclass=ABCMeta):
         """
         Callback upon closed connection.
 
-        :param _connection: connection that was closed
-        :param reason: reason for closing
-        :return: None
+        :param pika.SelectConnection _connection: connection that was closed
+        :param Exception reason: reason for closing
         """
         print("connection closed: {}".format(reason))
         if self._closing:
@@ -62,7 +75,10 @@ class RMQConnection(metaclass=ABCMeta):
 
     def disconnect(self):
         """
-        Disconnects from the RabbitMQ server.
+        Disconnects from the RabbitMQ server by calling close() on the
+        connection object. This operation should result in on_connection_closed
+        being invoked once the connection has been closed, allowing for further
+        handling of either gracefully shutting down or re-connecting.
         """
         print("closing connection")
         self._connection.close()
