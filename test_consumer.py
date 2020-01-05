@@ -1,5 +1,3 @@
-import time
-
 from rmq_client.client import RMQClient
 
 

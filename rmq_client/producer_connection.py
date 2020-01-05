@@ -153,6 +153,7 @@ class RMQProducerConnection(RMQConnection):
         print("producer connection handle_publish()")
 
         if publish.attempts > publish.MAX_ATTEMPTS:
+            # If max attempts reached, abort publish and write to critical log
             return
 
         cb = functools.partial(self.on_exchange_declared,
