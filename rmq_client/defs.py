@@ -33,6 +33,10 @@ class Publish:
     routing_key: str
     message_content: str
 
+    attempts: int
+
+    MAX_ATTEMPTS = 3
+
     def __init__(self, message_content, topic="", routing_key=""):
         """
         Initializes a publish object.
@@ -52,11 +56,18 @@ class Publish:
         self.routing_key = routing_key
         self.message_content = message_content
 
+        self.attempts = 0
+
+    def attempt(self):
+        self.attempts += 1
+
+        return self
+
     def __str__(self):
         return "{} {}".format(self.__class__, self.__dict__)
 
 
-class Message:
+class ConsumedMessage:
     """
     Class Message
 
@@ -78,12 +89,3 @@ class Message:
 
     def __str__(self):
         return "{} {}".format(self.__class__, self.__dict__)
-
-
-class ConnectionStopped:
-    """
-    Class ConnectionStopped
-
-    A message sent internally when an RMQ connection has been stopped.
-    """
-    pass

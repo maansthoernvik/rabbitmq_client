@@ -2,7 +2,7 @@ from enum import Enum
 from multiprocessing import Queue as IPCQueue, Process
 from threading import Thread
 
-from .defs import Subscription, Message, ConnectionStopped
+from .defs import Subscription, ConsumedMessage
 from .consumer_connection import create_consumer_connection
 
 
@@ -62,23 +62,22 @@ class RMQConsumer:
     def consume(self):
         """
         Recursively monitors the consumed_messages queue for any incoming
-        messages. Stops monitoring the queue when a ConnectionStopped message is
-        received.
+        messages.
         """
         print("consumer consume()")
         message = self._consumed_messages.get()
 
-        if isinstance(message, Message):
+        if isinstance(message, ConsumedMessage):
             self.handle_message(message)
 
         self.consume()
 
-    def handle_message(self, message: Message):
+    def handle_message(self, message: ConsumedMessage):
         """
         Defines handling for a received message, dispatches the message contents
         to registered callbacks depending on the topic.
 
-        :param Message message: received message
+        :param ConsumedMessage message: received message
         """
         print("consumer got message: {}".format(message))
         self._topic_callbacks.get(message.topic)(message.message_content)

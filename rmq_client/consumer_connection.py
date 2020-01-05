@@ -4,7 +4,7 @@ import functools
 from threading import Thread
 from multiprocessing import Queue as IPCQueue
 
-from .defs import Subscription, EXCHANGE_TYPE_FANOUT, Message
+from .defs import Subscription, EXCHANGE_TYPE_FANOUT, ConsumedMessage
 from .connection import RMQConnection
 
 
@@ -218,7 +218,7 @@ class RMQConsumerConnection(RMQConnection):
         print("message basic.deliver method: {}".format(basic_deliver))
         print("message properties: {}".format(properties))
         print("message body: {}".format(body))
-        self._consumed_messages.put(Message(basic_deliver.exchange, body))
+        self._consumed_messages.put(ConsumedMessage(basic_deliver.exchange, body))
 
         self._channel.basic_ack(basic_deliver.delivery_tag)
 

@@ -1,6 +1,8 @@
 import signal
 import functools
 
+from pika.spec import Basic
+
 from threading import Thread
 from multiprocessing import Queue as IPCQueue
 
@@ -32,8 +34,14 @@ class RMQProducerConnection(RMQConnection):
     monitoring the queue.
     """
 
+    # confirm mode
+    _expected_delivery_tag: int  # Keeps track of messages since Confirm.SelectOK
+    _pending_confirm: dict  # messages that have not been confirmed yet
+
+    # Connection
     _channel = None
 
+    # IPC
     _work_queue: IPCQueue
 
     def __init__(self, work_queue):
@@ -45,6 +53,9 @@ class RMQProducerConnection(RMQConnection):
                                     the consumer connection
         """
         print("producer connection __init__")
+        self._expected_delivery_tag = 0
+        self._pending_confirm = dict()
+
         self._work_queue = work_queue
 
         signal.signal(signal.SIGINT, self.interrupt)
@@ -140,9 +151,12 @@ class RMQProducerConnection(RMQConnection):
         :param Publish publish: information about a publish
         """
         print("producer connection handle_publish()")
+
+        if publish.attempts > publish.MAX_ATTEMPTS:
+            return
+
         cb = functools.partial(self.on_exchange_declared,
-                               exchange_name=publish.topic,
-                               message_content=publish.message_content)
+                               publish=publish)
         self._channel.exchange_declare(exchange=publish.topic,
                                        exchange_type=EXCHANGE_TYPE_FANOUT,
                                        callback=cb)
@@ -151,37 +165,46 @@ class RMQProducerConnection(RMQConnection):
         """
         Callback for when a publish is confirmed
 
-        :param pika.frame.Method frame: message frame
+        :param pika.frame.Method frame: message frame, either a Basic.Ack or
+                                        Basic.Nack
         """
         print("producer connection on_delivery_confirmed()")
         print("delivery confirmed frame: {}".format(frame))
+        publish = self._pending_confirm.pop(frame.method.delivery_tag)
 
-    def on_exchange_declared(self, _frame, exchange_name=None, message_content=None):
+        if isinstance(frame.method, Basic.Nack):
+            # Increment attempts and put back the publish on the work queue
+            self._work_queue.put(publish)
+        print("producer connection pending confirms: {}".format(self._pending_confirm))
+
+    def on_exchange_declared(self, _frame, publish: Publish=None):
         """
         Callback for when an exchange has been declared.
 
         :param pika.frame.Method _frame: message frame
-        :param str exchange_name: additional parameter from functools.partial,
-                                  used to carry the exchange_name
-        :param str message_content: additional parameter from functools.partial,
-                                    used to carry the message_content
+        :param str publish: additional parameter from functools.partial,
+                            used to carry the publish object
         """
-        print("producer connection on_exchange_declared(), exchange name: {}".format(exchange_name))
+        print("producer connection on_exchange_declared(), exchange name: {}".format(publish.topic))
         print("exchange declared message frame: {}".format(_frame))
-        print("exchange declared message_content: {}".format(message_content))
-        self.publish(exchange_name, message_content)
+        print("exchange declared message_content: {}".format(publish.message_content))
+        self.publish(publish)
 
-    def publish(self, exchange_name, message_content):
+    def publish(self, publish: Publish):
         """
-        Publish the message to the named exchange.
+        Perform a publish operation.
 
-        :param str exchange_name: name of exchange to publish to
-        :param str message_content: content of message to publish
+        :param Publish publish: the publish operation to perform
         """
         print("producer connection publish()")
-        self._channel.basic_publish(exchange=exchange_name,
+        self._expected_delivery_tag += 1
+        self._pending_confirm.update(
+            {self._expected_delivery_tag: publish.attempt()}
+        )
+        self._channel.basic_publish(exchange=publish.topic,
                                     routing_key="",
-                                    body=message_content)
+                                    body=publish.message_content)
+        print("producer connection pending confirms: {}".format(self._pending_confirm))
 
     def interrupt(self, _signum, _frame):
         """
