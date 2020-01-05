@@ -62,7 +62,7 @@ class RMQConnection(metaclass=ABCMeta):
 
     def disconnect(self):
         """
-        Starts disconnecting from the RabbitMQ server.
+        Disconnects from the RabbitMQ server.
         """
         print("closing connection")
         self._connection.close()

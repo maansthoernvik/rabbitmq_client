@@ -94,10 +94,10 @@ class RMQConsumerConnection(RMQConnection):
         if isinstance(work, Subscription):
             self.handle_subscription(work)
 
-    def handle_subscription(self, subscription):
+    def handle_subscription(self, subscription: Subscription):
         """
 
-        :param topic:
+        :param subscription:
         """
         print("consumer connection handle_subscription()")
         cb = functools.partial(self.on_exchange_declared,

@@ -1,5 +1,6 @@
 from multiprocessing import Queue as IPCQueue, Process
 
+from .defs import Publish
 from .producer_connection import create_producer_connection
 
 
@@ -33,4 +34,5 @@ class RMQProducer:
         :param topic:
         :param message:
         """
-        pass
+        print("producer publish()")
+        self._work_queue.put(Publish(message, topic=topic))

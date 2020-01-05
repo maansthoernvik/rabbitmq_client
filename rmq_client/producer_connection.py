@@ -4,6 +4,7 @@ import functools
 from threading import Thread
 from multiprocessing import Queue as IPCQueue
 
+from .defs import Publish, EXCHANGE_TYPE_FANOUT
 from .connection import RMQConnection
 
 
@@ -68,13 +69,59 @@ class RMQProducerConnection(RMQConnection):
         thread.start()
 
     def monitor_work_queue(self):
+        """
+
+        """
         print("producer connection monitoring work queue")
         work = self._work_queue.get()
         self.handle_work(work)
         self.monitor_work_queue()
 
     def handle_work(self, work):
+        """
+
+        :param work:
+        """
         print("producer connection got work: {}".format(work))
+
+        if isinstance(work, Publish):
+            self.handle_publish(work)
+
+    def handle_publish(self, work: Publish):
+        """
+
+        :param work:
+        """
+        print("producer connection handle_publish()")
+        cb = functools.partial(self.on_exchange_declared,
+                               exchange_name=work.topic,
+                               message_content=work.message_content)
+        self._channel.exchange_declare(exchange=work.topic,
+                                       exchange_type=EXCHANGE_TYPE_FANOUT,
+                                       callback=cb)
+
+    def on_exchange_declared(self, _frame, exchange_name=None, message_content=None):
+        """
+
+        :param _frame:
+        :param exchange_name:
+        :param message_content:
+        """
+        print("producer connection on_exchange_declared(), exchange name: {}".format(exchange_name))
+        print("exchange declared message frame: {}".format(_frame))
+        print("exchange declared message_content: {}".format(message_content))
+        self.publish(exchange_name, message_content)
+
+    def publish(self, exchange_name, message_content):
+        """
+
+        :param exchange_name:
+        :param message_content:
+        """
+        print("producer connection publish()")
+        self._channel.basic_publish(exchange=exchange_name,
+                                    routing_key="",
+                                    body=message_content)
 
     def interrupt(self, _signum, _frame):
         """
