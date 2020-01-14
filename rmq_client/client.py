@@ -1,3 +1,8 @@
+import logging
+
+from multiprocessing import Queue as IPCQueue
+
+from .log import LogHandler, LogItem
 from .consumer import RMQConsumer
 from .producer import RMQProducer
 
@@ -9,24 +14,34 @@ class RMQClient:
     Handles connection to RabbitMQ and provides and interface for applications
     wanting to either publish
     """
+    _log_handler: LogHandler
 
     _consumer: RMQConsumer
     _producer: RMQProducer
 
-    def __init__(self):
+    def __init__(self, log_level=logging.WARNING):
         """
         Initializes the RMQClient by initializing its member variables.
         """
-        print("client __init__")
-        self._consumer = RMQConsumer()
-        self._producer = RMQProducer()
+        self._log_handler = LogHandler(IPCQueue(),
+                                       log_level=log_level)
+        self._log_handler.handle_log_item(
+            LogItem("__init__", RMQClient.__name__, level=logging.DEBUG)
+        )
+
+        self._consumer = RMQConsumer(self._log_handler.get_log_queue())
+        self._producer = RMQProducer(self._log_handler.get_log_queue())
 
     def start(self):
         """
         Starts the RMQClient by starting its subsequent consumer and producer
         instances.
         """
-        print("client start()")
+        self._log_handler.start()
+        self._log_handler.handle_log_item(
+            LogItem("start", RMQClient.__name__, level=logging.DEBUG)
+        )
+
         self._consumer.start()
         self._producer.start()
 
@@ -44,7 +59,10 @@ class RMQClient:
         :param str topic: topic to subscribe to
         :param callable callback: callback on message received
         """
-        print("client subscribe()")
+        self._log_handler.handle_log_item(
+            LogItem("Subscribe to topic: {}".format(topic),
+                    RMQClient.__name__, level=logging.DEBUG)
+        )
         # dynamically add a subscription to a topic
         self._consumer.subscribe(topic, callback)
 
@@ -57,6 +75,9 @@ class RMQClient:
         :param str topic: topic to publish on
         :param str message: message to publish
         """
-        print("client publish()")
+        self._log_handler.handle_log_item(
+            LogItem("Publish to topic: {} message: {}".format(topic, message),
+                    RMQClient.__name__, level=logging.DEBUG)
+        )
         # publishes a message to the provided topic
         self._producer.publish(topic, message)

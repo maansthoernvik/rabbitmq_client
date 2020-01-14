@@ -1,3 +1,4 @@
+import logging
 import signal
 import functools
 
@@ -6,11 +7,12 @@ from pika.spec import Basic
 from threading import Thread
 from multiprocessing import Queue as IPCQueue
 
+from .log import LogItem
 from .defs import Publish, EXCHANGE_TYPE_FANOUT
 from .connection import RMQConnection
 
 
-def create_producer_connection(work_queue):
+def create_producer_connection(work_queue, log_queue):
     """
     Interface function to instantiate and connect a producer connection. This
     function is intended as a target for a new process to avoid having to
@@ -20,7 +22,7 @@ def create_producer_connection(work_queue):
     :param work_queue: process shared queue used to issue work for the
                        producer connection
     """
-    producer_connection = RMQProducerConnection(work_queue)
+    producer_connection = RMQProducerConnection(work_queue, log_queue)
     producer_connection.connect()
 
 
@@ -33,9 +35,12 @@ class RMQProducerConnection(RMQConnection):
     is read continuously by a connection process-local thread assigned to
     monitoring the queue.
     """
+    # general
+    log_queue: IPCQueue
 
     # confirm mode
-    _expected_delivery_tag: int  # Keeps track of messages since Confirm.SelectOK
+    # Keeps track of messages since Confirm.SelectOK
+    _expected_delivery_tag: int
     _pending_confirm: dict  # messages that have not been confirmed yet
 
     # Connection
@@ -44,15 +49,21 @@ class RMQProducerConnection(RMQConnection):
     # IPC
     _work_queue: IPCQueue
 
-    def __init__(self, work_queue):
+    def __init__(self, work_queue, log_queue):
         """
         Initializes the RMQProducerConnection's work queue and binds signal
         handlers. The work queue can be used to issue commands.
 
         :param IPCQueue work_queue: process shared queue used to issue work for
                                     the consumer connection
+        :param log_queue: process shared queue used to post messages to the
+                          logging process
         """
-        print("producer connection __init__")
+        self._log_queue = log_queue
+        self._log_queue.put(
+            LogItem("__init__", RMQProducerConnection.__name__, level=logging.DEBUG)
+        )
+
         self._expected_delivery_tag = 0
         self._pending_confirm = dict()
 
@@ -69,7 +80,10 @@ class RMQProducerConnection(RMQConnection):
 
         :param pika.SelectConnection _connection: established connection
         """
-        print("producer connection open")
+        self._log_queue.put(
+            LogItem("on_connection_open connection: {}".format(_connection),
+                    RMQProducerConnection.__name__, level=logging.DEBUG)
+        )
         self._connection.channel(on_open_callback=self.on_channel_open)
 
     def on_channel_open(self, channel):
@@ -78,7 +92,10 @@ class RMQProducerConnection(RMQConnection):
 
         :param pika.channel.Channel channel: the opened channel
         """
-        print("producer connection channel open")
+        self._log_queue.put(
+            LogItem("on_channel_open channel: {}".format(channel),
+                    RMQProducerConnection.__name__, level=logging.DEBUG)
+        )
         self._channel = channel
         self._channel.add_on_close_callback(self.on_channel_closed)
 
@@ -93,8 +110,10 @@ class RMQProducerConnection(RMQConnection):
 
         :param pika.frame.Method _frame: message frame
         """
-        print("producer connection on_confirm_mode_activated()")
-        print("Confirm.SelectOK: {}".format(_frame))
+        self._log_queue.put(
+            LogItem("on_confirm_mode_activated frame: {}".format(_frame),
+                    RMQProducerConnection.__name__, level=logging.DEBUG)
+        )
         self.producer_connection_started()
 
     def on_channel_closed(self, channel, reason):
@@ -104,7 +123,11 @@ class RMQProducerConnection(RMQConnection):
         :param pika.channel.Channel channel: the channel that was closed
         :param Exception reason: exception explaining why the channel was closed
         """
-        print("producer connection channel {} closed for reason: {}".format(channel, reason))
+        self._log_queue.put(
+            LogItem("on_channel_closed channel: {} reason: {}"
+                    .format(channel, reason), RMQProducerConnection.__name__,
+                    level=logging.DEBUG)
+        )
 
     def producer_connection_started(self):
         """
@@ -112,7 +135,10 @@ class RMQProducerConnection(RMQConnection):
         it is ready to receive and execute work, for instance to publish
         messages.
         """
-        print("producer connection started")
+        self._log_queue.put(
+            LogItem("producer_connection_started",
+                    RMQProducerConnection.__name__)
+        )
         thread = Thread(target=self.monitor_work_queue, daemon=True)
         thread.start()
 
@@ -127,7 +153,10 @@ class RMQProducerConnection(RMQConnection):
         Monitors the producer connection's work queue and executes from it as
         soon as work is available.
         """
-        print("producer connection monitoring work queue")
+        self._log_queue.put(
+            LogItem("monitor_work_queue", RMQProducerConnection.__name__,
+                    level=logging.DEBUG)
+        )
         work = self._work_queue.get()
         self.handle_work(work)
         self.monitor_work_queue()
@@ -139,7 +168,10 @@ class RMQProducerConnection(RMQConnection):
 
         :param Publish work: incoming work to be handled
         """
-        print("producer connection got work: {}".format(work))
+        self._log_queue.put(
+            LogItem("handle_work work: {}".format(work),
+                    RMQProducerConnection.__name__, level=logging.DEBUG)
+        )
 
         if isinstance(work, Publish):
             self.handle_publish(work)
@@ -150,7 +182,10 @@ class RMQProducerConnection(RMQConnection):
 
         :param Publish publish: information about a publish
         """
-        print("producer connection handle_publish()")
+        self._log_queue.put(
+            LogItem("handle_publish", RMQProducerConnection.__name__,
+                    level=logging.DEBUG)
+        )
 
         if publish.attempts > publish.MAX_ATTEMPTS:
             # If max attempts reached, abort publish and write to critical log
@@ -169,16 +204,24 @@ class RMQProducerConnection(RMQConnection):
         :param pika.frame.Method frame: message frame, either a Basic.Ack or
                                         Basic.Nack
         """
-        print("producer connection on_delivery_confirmed()")
-        print("delivery confirmed frame: {}".format(frame))
+        self._log_queue.put(
+            LogItem("on_delivery_confirmed frame: {}".format(frame),
+                    RMQProducerConnection.__name__, level=logging.DEBUG)
+        )
         publish = self._pending_confirm.pop(frame.method.delivery_tag)
 
         if isinstance(frame.method, Basic.Nack):
             # Increment attempts and put back the publish on the work queue
             self._work_queue.put(publish)
-        print("producer connection pending confirms: {}".format(self._pending_confirm))
 
-    def on_exchange_declared(self, _frame, publish: Publish=None):
+        self._log_queue.put(
+            LogItem("on_delivery_confirmed pending confirms: {}"
+                    .format(self._pending_confirm),
+                    RMQProducerConnection.__name__,
+                    level=logging.DEBUG)
+        )
+
+    def on_exchange_declared(self, _frame, publish: Publish = None):
         """
         Callback for when an exchange has been declared.
 
@@ -186,9 +229,11 @@ class RMQProducerConnection(RMQConnection):
         :param str publish: additional parameter from functools.partial,
                             used to carry the publish object
         """
-        print("producer connection on_exchange_declared(), exchange name: {}".format(publish.topic))
-        print("exchange declared message frame: {}".format(_frame))
-        print("exchange declared message_content: {}".format(publish.message_content))
+        self._log_queue.put(
+            LogItem("on_exchange_declared frame: {} publish: {}"
+                    .format(_frame, publish), RMQProducerConnection.__name__,
+                    level=logging.DEBUG)
+        )
         self.publish(publish)
 
     def publish(self, publish: Publish):
@@ -197,15 +242,25 @@ class RMQProducerConnection(RMQConnection):
 
         :param Publish publish: the publish operation to perform
         """
-        print("producer connection publish()")
+        self._log_queue.put(
+            LogItem("publish: {}".format(publish),
+                    RMQProducerConnection.__name__)
+        )
         self._expected_delivery_tag += 1
         self._pending_confirm.update(
             {self._expected_delivery_tag: publish.attempt()}
         )
-        self._channel.basic_publish(exchange=publish.topic,
-                                    routing_key="",
-                                    body=publish.message_content)
-        print("producer connection pending confirms: {}".format(self._pending_confirm))
+        self._channel.basic_publish(
+            exchange=publish.topic,
+            routing_key="",
+            body=publish.message_content.encode('utf-8')
+        )
+        self._log_queue.put(
+            LogItem("publish pending confirms: {}"
+                    .format(self._pending_confirm),
+                    RMQProducerConnection.__name__,
+                    level=logging.DEBUG)
+        )
 
     def interrupt(self, _signum, _frame):
         """
@@ -214,7 +269,9 @@ class RMQProducerConnection(RMQConnection):
         :param int _signum: signal.SIGINT
         :param ??? _frame: current stack frame
         """
-        print("producer connection interrupt")
+        self._log_queue.put(
+            LogItem("interrupt", RMQProducerConnection.__name__)
+        )
         self._closing = True
         self.disconnect()
 
@@ -225,6 +282,8 @@ class RMQProducerConnection(RMQConnection):
         :param int _signum: signal.SIGTERM
         :param ??? _frame: current stack frame
         """
-        print("producer connection terminate")
+        self._log_queue.put(
+            LogItem("terminate", RMQProducerConnection.__name__)
+        )
         self._closing = True
         self.disconnect()

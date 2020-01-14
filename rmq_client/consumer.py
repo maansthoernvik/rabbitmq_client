@@ -1,7 +1,9 @@
-from enum import Enum
+import logging
+
 from multiprocessing import Queue as IPCQueue, Process
 from threading import Thread
 
+from .log import LogItem
 from .defs import Subscription, ConsumedMessage
 from .consumer_connection import create_consumer_connection
 
@@ -21,6 +23,7 @@ class RMQConsumer:
     """
     # general
     _monitoring_thread: Thread
+    _log_queue: IPCQueue
 
     # Pub/sub
     _topic_callbacks: dict
@@ -31,11 +34,15 @@ class RMQConsumer:
     _work_queue: IPCQueue
     _consumed_messages: IPCQueue
 
-    def __init__(self):
+    def __init__(self, log_queue):
         """
         Initializes the RMQConsumer's member variables
         """
-        print("consumer __init__")
+        self._log_queue = log_queue
+        self._log_queue.put(
+            LogItem("__init__", RMQConsumer.__name__, level=logging.DEBUG)
+        )
+
         self._topic_callbacks = dict()
 
         self._work_queue = IPCQueue()
@@ -49,10 +56,12 @@ class RMQConsumer:
         RMQConsumerConnection. This function also starts a thread in the current
         process that monitors the consumed_messages queue for incoming messages.
         """
-        print("consumer start()")
+        self._log_queue.put(
+            LogItem("start", RMQConsumer.__name__, level=logging.DEBUG)
+        )
         self._connection_process = Process(
             target=create_consumer_connection,
-            args=(self._work_queue, self._consumed_messages)
+            args=(self._work_queue, self._consumed_messages, self._log_queue)
         )
         self._connection_process.start()
 
@@ -64,7 +73,9 @@ class RMQConsumer:
         Recursively monitors the consumed_messages queue for any incoming
         messages.
         """
-        print("consumer consume()")
+        self._log_queue.put(
+            LogItem("consume", RMQConsumer.__name__, level=logging.DEBUG)
+        )
         message = self._consumed_messages.get()
 
         if isinstance(message, ConsumedMessage):
@@ -79,7 +90,10 @@ class RMQConsumer:
 
         :param ConsumedMessage message: received message
         """
-        print("consumer got message: {}".format(message))
+        self._log_queue.put(
+            LogItem("handle_message got: {}".format(message),
+                    RMQConsumer.__name__)
+        )
         self._topic_callbacks.get(message.topic)(message.message_content)
 
     def stop(self):
@@ -90,7 +104,9 @@ class RMQConsumer:
         ConnectionStopped message will ensure that the monitoring_thread can be
         joined.
         """
-        print("consumer stop()")
+        self._log_queue.put(
+            LogItem("stop", RMQConsumer.__name__, level=logging.DEBUG)
+        )
         self._connection_process.terminate()
 
     def subscribe(self, topic, callback):
@@ -109,6 +125,8 @@ class RMQConsumer:
         # 1. Add callback to be called when event on that topic + routing_key
         # 2. Request a subscription on the new topic towards the consumer
         #    connection
-        print("consumer subscribe()")
+        self._log_queue.put(
+            LogItem("subscribe", RMQConsumer.__name__, level=logging.DEBUG)
+        )
         self._topic_callbacks.update({topic: callback})
         self._work_queue.put(Subscription(topic=topic))

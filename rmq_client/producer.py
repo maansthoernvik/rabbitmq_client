@@ -1,5 +1,7 @@
+import logging
 from multiprocessing import Queue as IPCQueue, Process
 
+from .log import LogItem
 from .defs import Publish
 from .producer_connection import create_producer_connection
 
@@ -10,17 +12,25 @@ class RMQProducer:
 
     Interface for producer-related operations towards a RabbitMQ server.
     """
+    # general
+    _log_queue: IPCQueue
 
+    # IPC
     _connection_process: Process
 
     _work_queue: IPCQueue
 
-    def __init__(self):
+    def __init__(self, log_queue):
         """
         Initializes the RMQProducer.
         """
-        print("producer __init__")
+        self._log_queue = log_queue
+
         self._work_queue = IPCQueue()
+
+        self._log_queue.put(
+            LogItem("__init__", RMQProducer.__name__, level=logging.DEBUG)
+        )
 
     def start(self):
         """
@@ -30,9 +40,12 @@ class RMQProducer:
         for the controlling process to issue commands to the connection process,
         for example to publish messages.
         """
-        print("producer start()")
+        self._log_queue.put(
+            LogItem("start", RMQProducer.__name__, level=logging.DEBUG)
+        )
         self._connection_process = Process(target=create_producer_connection,
-                                           args=(self._work_queue,))
+                                           args=(self._work_queue,
+                                                 self._log_queue))
         self._connection_process.start()
 
     def publish(self, topic, message):
@@ -42,5 +55,7 @@ class RMQProducer:
         :param str topic: topic to publish on
         :param str message: message content
         """
-        print("producer publish()")
+        self._log_queue.put(
+            LogItem("publish", RMQProducer.__name__, level=logging.DEBUG)
+        )
         self._work_queue.put(Publish(message, topic=topic))

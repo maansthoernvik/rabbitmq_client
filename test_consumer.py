@@ -1,3 +1,5 @@
+import logging
+
 from rmq_client.client import RMQClient
 
 
@@ -10,8 +12,9 @@ def sub_callback(message):
 
 
 if __name__ == "__main__":
-    client = RMQClient()
-
+    print("instantiating RMQ client")
+    client = RMQClient(log_level=logging.DEBUG)
+    print("starting RMQ client")
     client.start()
 
     client.subscribe(TEST_TOPIC_1, sub_callback)

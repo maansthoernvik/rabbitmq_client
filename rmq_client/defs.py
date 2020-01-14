@@ -75,14 +75,14 @@ class ConsumedMessage:
     """
 
     topic: str
-    message_content: bytes
+    message_content: str
 
     def __init__(self, topic, message_content):
         """
         Initializes a message object.
 
         :param str topic: topic the message was posted on
-        :param bytes message_content: message content in bytes format
+        :param str message_content: message content in bytes format
         """
         self.topic = topic
         self.message_content = message_content

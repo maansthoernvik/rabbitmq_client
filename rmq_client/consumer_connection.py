@@ -1,14 +1,16 @@
+import logging
 import signal
 import functools
 
 from threading import Thread
 from multiprocessing import Queue as IPCQueue
 
+from .log import LogItem
 from .defs import Subscription, EXCHANGE_TYPE_FANOUT, ConsumedMessage
 from .connection import RMQConnection
 
 
-def create_consumer_connection(work_queue, consumed_messages):
+def create_consumer_connection(work_queue, consumed_messages, log_queue):
     """
     Interface function to instantiate and connect a consumer connection. This
     function is intended as a target for a new process to avoid having to
@@ -21,7 +23,8 @@ def create_consumer_connection(work_queue, consumed_messages):
                                        messages received for a subscribed topic
                                        to the controlling process
     """
-    consumer_connection = RMQConsumerConnection(work_queue, consumed_messages)
+    consumer_connection = RMQConsumerConnection(work_queue, consumed_messages,
+                                                log_queue)
     consumer_connection.connect()
 
 
@@ -36,13 +39,15 @@ class RMQConsumerConnection(RMQConnection):
     3. posting consumed messages to a process shared queue so that incoming
        messages can be read and handled by the controlling process.
     """
+    # general
+    _log_queue: IPCQueue
 
     _channel = None
 
     _work_queue: IPCQueue
     _consumed_messages: IPCQueue
 
-    def __init__(self, work_queue, consumed_messages):
+    def __init__(self, work_queue, consumed_messages, log_queue):
         """
         Initializes the RMQConsumerConnection with two queues and binds signal
         handlers. The two queues are used to communicate between the connection
@@ -55,8 +60,15 @@ class RMQConsumerConnection(RMQConnection):
         :param consumed_messages: process shared queue used to forward messages
                                   received for a subscribed topic to the
                                   controlling process
+        :param log_queue: process shared queue used to post messages to the
+                          logging process
         """
-        print("consumer connection __init__")
+        self._log_queue = log_queue
+        self._log_queue.put(
+            LogItem("__init__", RMQConsumerConnection.__name__,
+                    level=logging.DEBUG)
+        )
+
         self._work_queue = work_queue
         self._consumed_messages = consumed_messages
 
@@ -71,7 +83,10 @@ class RMQConsumerConnection(RMQConnection):
 
         :param pika.SelectConnection _connection: established connection
         """
-        print("consumer connection open")
+        self._log_queue.put(
+            LogItem("on_connection_open connection: {}".format(_connection),
+                    RMQConsumerConnection.__name__, level=logging.DEBUG)
+        )
         self._connection.channel(on_open_callback=self.on_channel_open)
 
     def on_channel_open(self, channel):
@@ -80,7 +95,10 @@ class RMQConsumerConnection(RMQConnection):
 
         :param pika.channel.Channel channel: the opened channel
         """
-        print("consumer connection channel open")
+        self._log_queue.put(
+            LogItem("on_channel_open channel: {}".format(channel),
+                    RMQConsumerConnection.__name__, level=logging.DEBUG)
+        )
         self._channel = channel
         self._channel.add_on_close_callback(self.on_channel_closed)
 
@@ -93,8 +111,11 @@ class RMQConsumerConnection(RMQConnection):
         :param pika.channel.Channel channel: the channel that was closed
         :param Exception reason: exception explaining why the channel was closed
         """
-        print("consumer connection channel {} closed for reason: {}".format(
-            channel, reason))
+        self._log_queue.put(
+            LogItem("on_channel_closed channel: {} reason: {}"
+                    .format(channel, reason), RMQConsumerConnection.__name__,
+                    level=logging.DEBUG)
+        )
 
     def consumer_connection_started(self):
         """
@@ -102,7 +123,10 @@ class RMQConsumerConnection(RMQConnection):
         point where it is ready to receive work from its controlling process.
         In this case, when a channel has been established.
         """
-        print("consumer connection started")
+        self._log_queue.put(
+            LogItem("consumer_connection_started",
+                    RMQConsumerConnection.__name__)
+        )
         thread = Thread(target=self.monitor_work_queue, daemon=True)
         thread.start()
 
@@ -117,7 +141,10 @@ class RMQConsumerConnection(RMQConnection):
         Monitors the consumer connection's work queue and executes from it as
         soon as work is available.
         """
-        print("consumer connection monitoring work queue")
+        self._log_queue.put(
+            LogItem("monitor_work_queue", RMQConsumerConnection.__name__,
+                    level=logging.DEBUG)
+        )
         work = self._work_queue.get()  # Blocking, set block=false to not
         self.handle_work(work)
         self.monitor_work_queue()  # Recursive call
@@ -129,7 +156,11 @@ class RMQConsumerConnection(RMQConnection):
 
         :param Subscription work: incoming work to be handled
         """
-        print("consumer connection got work: {}".format(work))
+        self._log_queue.put(
+            LogItem("handle_work work: {}".format(work),
+                    RMQConsumerConnection.__name__,
+                    level=logging.DEBUG)
+        )
         if isinstance(work, Subscription):
             self.handle_subscription(work)
 
@@ -139,7 +170,10 @@ class RMQConsumerConnection(RMQConnection):
 
         :param Subscription subscription: information about a subscription
         """
-        print("consumer connection handle_subscription()")
+        self._log_queue.put(
+            LogItem("handle_subscription", RMQConsumerConnection.__name__,
+                    level=logging.DEBUG)
+        )
         cb = functools.partial(self.on_exchange_declared,
                                exchange_name=subscription.topic)
         self._channel.exchange_declare(exchange=subscription.topic,
@@ -154,10 +188,12 @@ class RMQConsumerConnection(RMQConnection):
         :param str exchange_name: additional parameter from functools.partial,
                                   used to carry the exchange_name
         """
-        print(
-            "consumer connection on_exchange_declared(), exchange name: {}".format(
-                exchange_name))
-        print("exchange declared message frame: {}".format(_frame))
+        self._log_queue.put(
+            LogItem("on_exchange_declared exchange_name: {}, frame: {}"
+                    .format(exchange_name, _frame),
+                    RMQConsumerConnection.__name__,
+                    level=logging.DEBUG)
+        )
         cb = functools.partial(self.on_queue_declared,
                                exchange_name=exchange_name)
         self._channel.queue_declare(queue="", exclusive=True, callback=cb)
@@ -170,9 +206,12 @@ class RMQConsumerConnection(RMQConnection):
         :param str exchange_name: additional parameter from functools.partial,
                                   used to carry the exchange_name
         """
-        print("consumer connection on_queue_declared(), queue name: {}".format(
-            frame.method.queue))
-        print("queue declared message frame: {}".format(frame))
+        self._log_queue.put(
+            LogItem("on_queue_declared exchange_name: {}, frame: {}"
+                    .format(exchange_name, frame),
+                    RMQConsumerConnection.__name__,
+                    level=logging.DEBUG)
+        )
         cb = functools.partial(self.on_queue_bound,
                                exchange_name=exchange_name,
                                queue_name=frame.method.queue)
@@ -190,9 +229,11 @@ class RMQConsumerConnection(RMQConnection):
         :param str queue_name: additional parameter from functools.partial, used
                                to carry the exchange_name
         """
-        print("consumer connection on_queue_bound()")
-        print("queue bound message frame: {}".format(_frame))
-        print("bound queue {} to exchange {}".format(queue_name, exchange_name))
+        self._log_queue.put(
+            LogItem("on_queue_bound exchange_name: {}, queue_name: {}, "
+                    "frame: {}".format(exchange_name, queue_name, _frame),
+                    RMQConsumerConnection.__name__, level=logging.DEBUG)
+        )
         self.consume(queue_name)
 
     def consume(self, queue_name):
@@ -201,7 +242,11 @@ class RMQConsumerConnection(RMQConnection):
 
         :param str queue_name: name of the queue to consume from
         """
-        print("consumer connection consume()")
+        self._log_queue.put(
+            LogItem("consume queue_name: {}".format(queue_name),
+                    RMQConsumerConnection.__name__,
+                    level=logging.DEBUG)
+        )
         self._channel.add_on_cancel_callback(self.on_consumer_cancelled)
         self._channel.basic_consume(queue_name, self.on_message, exclusive=True)
 
@@ -214,11 +259,13 @@ class RMQConsumerConnection(RMQConnection):
         :param pika.spec.BasicProperties properties: properties of the message
         :param bytes body: message body
         """
-        print("consumer connection on_message()")
-        print("message basic.deliver method: {}".format(basic_deliver))
-        print("message properties: {}".format(properties))
-        print("message body: {}".format(body))
-        self._consumed_messages.put(ConsumedMessage(basic_deliver.exchange, body))
+        self._log_queue.put(
+            LogItem("on_message method: {} properties: {} body: {}"
+                    .format(basic_deliver, properties, body),
+                    RMQConsumerConnection.__name__)
+        )
+        self._consumed_messages.put(
+            ConsumedMessage(basic_deliver.exchange, body.decode('utf-8')))
 
         self._channel.basic_ack(basic_deliver.delivery_tag)
 
@@ -228,7 +275,10 @@ class RMQConsumerConnection(RMQConnection):
 
         :param pika.frame.Method _frame: message frame
         """
-        print("consumer connection on_consumer_cancelled()")
+        self._log_queue.put(
+            LogItem("on_consumer_cancelled frame: {}".format(_frame),
+                    RMQConsumerConnection.__name__, level=logging.DEBUG)
+        )
 
     def interrupt(self, _signum, _frame):
         """
@@ -237,7 +287,9 @@ class RMQConsumerConnection(RMQConnection):
         :param int _signum: signal.SIGINT
         :param ??? _frame: current stack frame
         """
-        print("consumer connection interrupt")
+        self._log_queue.put(
+            LogItem("interrupt", RMQConsumerConnection.__name__)
+        )
         self._closing = True
         self.disconnect()
 
@@ -248,6 +300,8 @@ class RMQConsumerConnection(RMQConnection):
         :param int _signum: signal.SIGTERM
         :param ??? _frame: current stack frame
         """
-        print("consumer connection terminate")
+        self._log_queue.put(
+            LogItem("terminate", RMQConsumerConnection.__name__)
+        )
         self._closing = True
         self.disconnect()
