@@ -57,7 +57,7 @@ class RMQConsumer:
         process that monitors the consumed_messages queue for incoming messages.
         """
         self._log_queue.put(
-            LogItem("start", RMQConsumer.__name__, level=logging.DEBUG)
+            LogItem("start", RMQConsumer.__name__)
         )
         self._connection_process = Process(
             target=create_consumer_connection,
@@ -94,22 +94,21 @@ class RMQConsumer:
             LogItem("handle_message got: {}".format(message),
                     RMQConsumer.__name__)
         )
-        self._topic_callbacks.get(message.topic)(message.message_content)
+        if message.correlation_id:
+            self._topic_callbacks.get(message.topic)(message)
+        else:
+            self._topic_callbacks.get(message.topic)(message.message_content)
 
     def stop(self):
         """
         Stops the RMQConsumer, tearing down the RMQConsumerConnection process.
-        The consumer connection will notify the consumer of its closing by
-        posting a ConnectionStopped message on the consumed_messages queue. The
-        ConnectionStopped message will ensure that the monitoring_thread can be
-        joined.
         """
         self._log_queue.put(
-            LogItem("stop", RMQConsumer.__name__, level=logging.DEBUG)
+            LogItem("stop", RMQConsumer.__name__)
         )
         self._connection_process.terminate()
 
-    def subscribe(self, topic, callback):
+    def subscribe(self, topic, callback, sub_type=Subscription.TOPIC):
         """
         Subscribes to messages sent to the named topic. Messages received on
         this topic will be dispatched to the provided callback.
@@ -121,6 +120,7 @@ class RMQConsumer:
 
         :param str topic: topic to subscribe to
         :param callable callback: callback on message received
+        :param sub_type: type of subscription to be made
         """
         # 1. Add callback to be called when event on that topic + routing_key
         # 2. Request a subscription on the new topic towards the consumer
@@ -129,4 +129,4 @@ class RMQConsumer:
             LogItem("subscribe", RMQConsumer.__name__, level=logging.DEBUG)
         )
         self._topic_callbacks.update({topic: callback})
-        self._work_queue.put(Subscription(topic=topic))
+        self._work_queue.put(Subscription(topic=topic, sub_type=sub_type))

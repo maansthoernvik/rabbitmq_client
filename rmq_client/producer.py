@@ -41,14 +41,23 @@ class RMQProducer:
         for example to publish messages.
         """
         self._log_queue.put(
-            LogItem("start", RMQProducer.__name__, level=logging.DEBUG)
+            LogItem("start", RMQProducer.__name__)
         )
         self._connection_process = Process(target=create_producer_connection,
                                            args=(self._work_queue,
                                                  self._log_queue))
         self._connection_process.start()
 
-    def publish(self, topic, message):
+    def stop(self):
+        """
+        Stops the RMQConsumer, tearing down the RMQProducerConnection process.
+        """
+        self._log_queue.put(
+            LogItem("stop", RMQProducer.__name__)
+        )
+        self._connection_process.terminate()
+
+    def publish(self, topic, message, correlation_id=None, reply_to=None):
         """
         Publishes a message on the supplied topic.
 
@@ -58,4 +67,7 @@ class RMQProducer:
         self._log_queue.put(
             LogItem("publish", RMQProducer.__name__, level=logging.DEBUG)
         )
-        self._work_queue.put(Publish(message, topic=topic))
+        self._work_queue.put(Publish(message,
+                                     topic,
+                                     correlation_id=correlation_id,
+                                     reply_to=reply_to))

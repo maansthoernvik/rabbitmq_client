@@ -10,6 +10,9 @@ from .defs import Subscription, EXCHANGE_TYPE_FANOUT, ConsumedMessage
 from .connection import RMQConnection
 
 
+AUTO_GEN_QUEUE_NAME = ""
+
+
 def create_consumer_connection(work_queue, consumed_messages, log_queue):
     """
     Interface function to instantiate and connect a consumer connection. This
@@ -100,7 +103,12 @@ class RMQConsumerConnection(RMQConnection):
                     RMQConsumerConnection.__name__, level=logging.DEBUG)
         )
         self._channel = channel
+
+        # Channel close
         self._channel.add_on_close_callback(self.on_channel_closed)
+
+        # Consumer cancelled
+        self._channel.add_on_cancel_callback(self.on_consumer_cancelled)
 
         self.consumer_connection_started()
 
@@ -145,7 +153,7 @@ class RMQConsumerConnection(RMQConnection):
             LogItem("monitor_work_queue", RMQConsumerConnection.__name__,
                     level=logging.DEBUG)
         )
-        work = self._work_queue.get()  # Blocking, set block=false to not
+        work = self._work_queue.get()  # Blocking, set block=false to not block
         self.handle_work(work)
         self.monitor_work_queue()  # Recursive call
 
@@ -174,11 +182,24 @@ class RMQConsumerConnection(RMQConnection):
             LogItem("handle_subscription", RMQConsumerConnection.__name__,
                     level=logging.DEBUG)
         )
-        cb = functools.partial(self.on_exchange_declared,
-                               exchange_name=subscription.topic)
-        self._channel.exchange_declare(exchange=subscription.topic,
-                                       exchange_type=EXCHANGE_TYPE_FANOUT,
-                                       callback=cb)
+
+        if subscription.sub_type == Subscription.TOPIC:
+            cb = functools.partial(self.on_exchange_declared,
+                                   exchange_name=subscription.topic)
+            self._channel.exchange_declare(exchange=subscription.topic,
+                                           exchange_type=EXCHANGE_TYPE_FANOUT,
+                                           callback=cb)
+
+        elif subscription.sub_type == Subscription.RPC_REPLY:
+            self._channel.queue_declare(queue=subscription.topic,
+                                        exclusive=True,
+                                        callback=self.on_queue_declared)
+
+        elif subscription.sub_type == Subscription.RPC_REQUEST:
+            self._channel.queue_declare(queue=subscription.topic,
+                                        # durable=True,
+                                        callback=self.on_queue_declared
+                                        )
 
     def on_exchange_declared(self, _frame, exchange_name=None):
         """
@@ -196,7 +217,9 @@ class RMQConsumerConnection(RMQConnection):
         )
         cb = functools.partial(self.on_queue_declared,
                                exchange_name=exchange_name)
-        self._channel.queue_declare(queue="", exclusive=True, callback=cb)
+        self._channel.queue_declare(queue=AUTO_GEN_QUEUE_NAME,
+                                    exclusive=True,
+                                    callback=cb)
 
     def on_queue_declared(self, frame, exchange_name=None):
         """
@@ -212,12 +235,18 @@ class RMQConsumerConnection(RMQConnection):
                     RMQConsumerConnection.__name__,
                     level=logging.DEBUG)
         )
-        cb = functools.partial(self.on_queue_bound,
-                               exchange_name=exchange_name,
-                               queue_name=frame.method.queue)
-        self._channel.queue_bind(
-            frame.method.queue, exchange_name, callback=cb
-        )
+
+        if exchange_name:
+            cb = functools.partial(self.on_queue_bound,
+                                   exchange_name=exchange_name,
+                                   queue_name=frame.method.queue)
+            self._channel.queue_bind(
+                frame.method.queue, exchange_name, callback=cb
+            )
+
+        else:
+            # No exchange = no need to bind the queue
+            self.consume(frame.method.queue)
 
     def on_queue_bound(self, _frame, exchange_name=None, queue_name=None):
         """
@@ -247,7 +276,6 @@ class RMQConsumerConnection(RMQConnection):
                     RMQConsumerConnection.__name__,
                     level=logging.DEBUG)
         )
-        self._channel.add_on_cancel_callback(self.on_consumer_cancelled)
         self._channel.basic_consume(queue_name, self.on_message, exclusive=True)
 
     def on_message(self, _channel, basic_deliver, properties, body):
@@ -265,7 +293,15 @@ class RMQConsumerConnection(RMQConnection):
                     RMQConsumerConnection.__name__)
         )
         self._consumed_messages.put(
-            ConsumedMessage(basic_deliver.exchange, body.decode('utf-8')))
+            ConsumedMessage(
+                basic_deliver.exchange if properties.correlation_id is None
+                else
+                basic_deliver.routing_key,
+                body.decode('utf-8'),
+                correlation_id=properties.correlation_id,
+                reply_to=properties.reply_to
+            )
+        )
 
         self._channel.basic_ack(basic_deliver.delivery_tag)
 

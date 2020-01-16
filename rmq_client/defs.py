@@ -7,16 +7,23 @@ class Subscription:
 
     A Subscription work item.
     """
+    TOPIC = 0
+    RPC_REPLY = 1
+    RPC_REQUEST = 2
 
     topic: str
+    sub_type: int
 
-    def __init__(self, topic=""):
+    kwargs: dict
+
+    def __init__(self, topic="", sub_type=TOPIC):
         """
         Initializes a subscription object.
 
         :param str topic: topic to subscribe to
         """
         self.topic = topic
+        self.sub_type = sub_type
 
     def __str__(self):
         return "{} {}".format(self.__class__, self.__dict__)
@@ -29,15 +36,21 @@ class Publish:
     A Publish work item.
     """
 
-    topic: str
-    routing_key: str
+    exchange: str = ""
+    routing_key: str = ""
     message_content: str
+    correlation_id: str
+    reply_to: str
 
     attempts: int
 
     MAX_ATTEMPTS = 3
 
-    def __init__(self, message_content, topic="", routing_key=""):
+    def __init__(self,
+                 message_content,
+                 topic,
+                 correlation_id=None,
+                 reply_to=None):
         """
         Initializes a publish object.
 
@@ -49,11 +62,15 @@ class Publish:
         :param str topic: topic to send the message on
         :param str routing_key: routing key to send the message on
         """
-        assert topic or routing_key, "Either a topic or routing_key must be " \
-                                     "given for a publish."
 
-        self.topic = topic
-        self.routing_key = routing_key
+        self.correlation_id = correlation_id
+        self.reply_to = reply_to
+
+        if reply_to or correlation_id:
+            self.routing_key = topic
+        else:
+            self.exchange = topic
+
         self.message_content = message_content
 
         self.attempts = 0
@@ -76,8 +93,14 @@ class ConsumedMessage:
 
     topic: str
     message_content: str
+    correlation_id: str
+    reply_to: str
 
-    def __init__(self, topic, message_content):
+    def __init__(self,
+                 topic,
+                 message_content,
+                 correlation_id=None,
+                 reply_to=None):
         """
         Initializes a message object.
 
@@ -86,6 +109,21 @@ class ConsumedMessage:
         """
         self.topic = topic
         self.message_content = message_content
+        self.correlation_id = correlation_id
+        self.reply_to = reply_to
+
+    def __str__(self):
+        return "{} {}".format(self.__class__, self.__dict__)
+
+
+class RPCReply:
+
+    message_content: str
+    correlation_id: str
+
+    def __init__(self, message_content, correlation_id):
+        self.message_content = message_content
+        self.correlation_id = correlation_id
 
     def __str__(self):
         return "{} {}".format(self.__class__, self.__dict__)

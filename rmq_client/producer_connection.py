@@ -2,7 +2,7 @@ import logging
 import signal
 import functools
 
-from pika.spec import Basic
+from pika.spec import Basic, BasicProperties
 
 from threading import Thread
 from multiprocessing import Queue as IPCQueue
@@ -189,13 +189,21 @@ class RMQProducerConnection(RMQConnection):
 
         if publish.attempts > publish.MAX_ATTEMPTS:
             # If max attempts reached, abort publish and write to critical log
+            self._log_queue.put(
+                LogItem("handle_publish max attempts exceeded",
+                        RMQProducerConnection.__name__, level=logging.CRITICAL)
+            )
             return
 
-        cb = functools.partial(self.on_exchange_declared,
-                               publish=publish)
-        self._channel.exchange_declare(exchange=publish.topic,
-                                       exchange_type=EXCHANGE_TYPE_FANOUT,
-                                       callback=cb)
+        if publish.reply_to or publish.correlation_id:
+            self.publish(publish)
+
+        else:
+            cb = functools.partial(self.on_exchange_declared,
+                                   publish=publish)
+            self._channel.exchange_declare(exchange=publish.exchange,
+                                           exchange_type=EXCHANGE_TYPE_FANOUT,
+                                           callback=cb)
 
     def on_delivery_confirmed(self, frame):
         """
@@ -250,10 +258,17 @@ class RMQProducerConnection(RMQConnection):
         self._pending_confirm.update(
             {self._expected_delivery_tag: publish.attempt()}
         )
+
+        properties = BasicProperties(
+            reply_to=publish.reply_to,
+            correlation_id=publish.correlation_id
+        ) if publish.reply_to or publish.correlation_id else None
+
         self._channel.basic_publish(
-            exchange=publish.topic,
-            routing_key="",
-            body=publish.message_content.encode('utf-8')
+            exchange=publish.exchange,
+            routing_key=publish.routing_key,
+            body=publish.message_content.encode('utf-8'),
+            properties=properties
         )
         self._log_queue.put(
             LogItem("publish pending confirms: {}"
