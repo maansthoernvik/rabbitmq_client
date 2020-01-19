@@ -28,10 +28,80 @@ class LogItem:
         self.app_name = app_name
 
 
+class LogClient:
+    """
+    Used as a proxy for the log queue which each part of the RMQ Client uses.
+    This way, some of the repeated code gets put in one place and reduces the
+    space taken by each write.
+    """
+
+    _log_queue: IPCQueue
+    _app_name: str
+
+    def __init__(self, log_queue, app_name):
+        """
+        :param log_queue: queue which log entries get put in
+        :param app_name: application name to tag every log entry
+        """
+        self._log_queue = log_queue
+        self._app_name = app_name
+
+    def get_log_queue(self):
+        return self._log_queue
+
+    def debug(self, message):
+        """
+        Logs a debug message.
+
+        :param message: message to log.
+        """
+        self._log_queue.put(
+            LogItem(message, self._app_name, level=logging.DEBUG)
+        )
+
+    def info(self, message):
+        """
+        Logs an info message.
+
+        :param message: message to log.
+        """
+        self._log_queue.put(
+            LogItem(message, self._app_name, level=logging.INFO)
+        )
+
+    def warning(self, message):
+        """
+        Logs a warning message.
+
+        :param message: message to log.
+        """
+        self._log_queue.put(
+            LogItem(message, self._app_name, level=logging.WARNING)
+        )
+
+    def error(self, message):
+        """
+        Logs an error message.
+
+        :param message: message to log.
+        """
+        self._log_queue.put(
+            LogItem(message, self._app_name, level=logging.ERROR)
+        )
+
+    def critical(self, message):
+        """
+        Logs a critical message.
+
+        :param message: message to log.
+        """
+        self._log_queue.put(
+            LogItem(message, self._app_name, level=logging.CRITICAL)
+        )
+
+
 class LogHandler:
     """
-    Class LogHandler
-
     This class makes sure that all the processes spawned by the RMQClient can
     use a centralized logging solution. This class' member queue is monitored
     for log messages that a process may want to send to file, which the
@@ -60,7 +130,7 @@ class LogHandler:
 
         self.logger = logging.getLogger(LOGGER_NAME)
         self.logger.setLevel(log_level)
-        file_handler = logging.FileHandler("rmq_client.log")
+        file_handler = logging.FileHandler("rmq_client.log", mode=filemode)
         file_handler.setLevel(log_level)
         # Padding log level name to 8 characters, CRITICAL is the longest,
         # centered log level by '^'.

@@ -1,4 +1,3 @@
-import logging
 import uuid
 
 from multiprocessing import Queue as IPCQueue
@@ -6,7 +5,7 @@ from threading import Event
 
 from .common_defs import Printable
 from .consumer_defs import ConsumedMessage
-from .log import LogItem
+from .log import LogClient
 from .consumer import RMQConsumer
 from .producer import RMQProducer
 
@@ -25,60 +24,99 @@ class RPCResponse(Printable):
 
 
 class RMQRPCHandler:
-
-    _log_queue: IPCQueue
+    """
+    RPC handler which uses the consumer and producer instances to handle RPC
+    requests and responses.
+    """
+    _log_client: LogClient
 
     _consumer: RMQConsumer
     _producer: RMQProducer
 
     # RPC Server
-    _rpc_queue_name: str = None
+    _request_queue_name: str = None
     _rpc_request_callback: callable
 
     # RPC Client
-    _reply_queue: str = None
+    _response_queue_name: str = None
     _pending_requests: dict
 
     def __init__(self, consumer, producer, log_queue):
-        self._log_queue = log_queue
-        self._log_queue.put(
-            LogItem("__init__", RMQRPCHandler.__name__, level=logging.DEBUG)
-        )
+        """
+        :param consumer: consumer instance
+        :param producer: producer instanse
+        :param log_queue: IPC queue to issue log writes to
+        """
+        self._log_client = LogClient(log_queue, RMQRPCHandler.__name__)
+        self._log_client.debug("__init__")
 
         self._consumer = consumer
         self._producer = producer
 
     def start(self):
-        self._log_queue.put(
-            LogItem("start", RMQRPCHandler.__name__)
-        )
+        """
+        Not needed, yet.
+        """
+        pass
 
     def stop(self):
+        """
+        Not needed, yet.
+        """
         pass
 
     def enable_rpc_server(self, rpc_queue_name, rpc_request_callback):
-        if self._rpc_queue_name:
+        """
+        Enables an RPC server, which can accept requests and respond to them.
+        The RPC handler will subscribe to the queue name and expect the
+        provided callback to RETURN a value which it can reply with.
+
+            rpc_request_callback(message: bytes) -> bytes
+
+         !!! NOTE The importance of the supplied callback to RETURN bytes. !!!
+
+        :param rpc_queue_name: name of RPC request queue to subscribe to
+        :param rpc_request_callback: callback to issue requests to
+        """
+        self._log_client.debug("enable_rpc_server")
+
+        if self._request_queue_name:
+            self._log_client.warning("enable_rpc_server an RPC server has"
+                                     "already been declared")
             return
 
-        self._rpc_queue_name = rpc_queue_name
+        self._request_queue_name = rpc_queue_name
         self._rpc_request_callback = rpc_request_callback
-        self._consumer.rpc_server(self._rpc_queue_name,
+        self._consumer.rpc_server(self._request_queue_name,
                                   self.handle_rpc_request)
 
     def enable_rpc_client(self):
-        if self._reply_queue:
+        """
+        Enables the client to act as an RPC client. This will establish a reply
+        queue to receive responses to sent RPC requests.
+        """
+        self._log_client.debug("enable_rpc_client")
+
+        if self._response_queue_name:
             return
 
         self._pending_requests = dict()
-        self._reply_queue = RPC_REPLY_PREFIX + str(uuid.uuid1())
-        self._consumer.rpc_client(self._reply_queue, self.handle_rpc_reply)
+        self._response_queue_name = RPC_REPLY_PREFIX + str(uuid.uuid1())
+        self._consumer.rpc_client(self._response_queue_name, self.handle_rpc_response)
 
     def rpc_call(self, receiver, message):
-        self._log_queue.put(
-            LogItem("rpc_call",
-                    RMQRPCHandler.__name__,
-                    level=logging.DEBUG)
-        )
+        """
+        NOTE! Must enable_rpc_client before making calls to this function.
+
+        Make a synchronous call to an RPC server.
+
+        :param receiver: name of the RPC server to send the request to
+        :param message: message to send to the RPC server
+
+        :return answer: response message from the RPC server
+        """
+        self._log_client.debug("rpc_call")
+
         corr_id = str(uuid.uuid1())
 
         response = RPCResponse()
@@ -87,44 +125,55 @@ class RMQRPCHandler:
         self._producer.rpc_request(receiver,
                                    message,
                                    corr_id,
-                                   self._reply_queue)
+                                   self._response_queue_name)
 
-        self._log_queue.put(
-            LogItem("blocking waiting for response".format(response.response),
-                    RMQRPCHandler.__name__,
-                    level=logging.DEBUG)
-        )
+        self._log_client.debug("rpc_call blocking waiting for response")
+
         response.blocker.wait(timeout=2.0)
+        if self._pending_requests.get(corr_id):
+            self._log_client.info("rpc_call timed out waiting for a response")
+            self._pending_requests.pop(corr_id)
+        else:
+            self._log_client.info("rpc_call got response: {}".format(response))
 
-        self._log_queue.put(
-            LogItem("rpc_call response: {}".format(response.response),
-                    RMQRPCHandler.__name__,
-                    level=logging.DEBUG)
-        )
         return response.response
 
+    def rpc_cast(self, receiver, message, callback):
+        """
+        NOTE! Must enable_rpc_client before making calls to this function.
+
+        Make an asynchronous call to an RPC server.
+
+        :param receiver: name of the RPC server to send the request to
+        :param message: message to send to the RPC server
+        :param callback: callback for when response is gotten
+        """
+        pass
+
     def handle_rpc_request(self, message: ConsumedMessage):
-        self._log_queue.put(
-            LogItem("handle_rpc_request request: {}".format(message),
-                    RMQRPCHandler.__name__,
-                    level=logging.DEBUG)
-        )
+        """
+        Handler for an incoming RPC request.
+
+        :param message: consumed RPC request
+        """
+        self._log_client.debug("handle_rpc_request request: {}".format(message))
+
         answer = self._rpc_request_callback(message.message)
 
-        self._producer.rpc_reply(message.reply_to,
-                                 answer,
-                                 correlation_id=message.correlation_id)
+        self._producer.rpc_response(message.reply_to,
+                                    answer,
+                                    correlation_id=message.correlation_id)
 
-    def handle_rpc_reply(self, message: ConsumedMessage):
-        self._log_queue.put(
-            LogItem("handle_rpc_reply reply: {}".format(message),
-                    RMQRPCHandler.__name__,
-                    level=logging.DEBUG)
-        )
+    def handle_rpc_response(self, message: ConsumedMessage):
+        """
+        Handler for an incoming RPC response.
+
+        :param message: consumed RPC response
+        """
+        self._log_client.debug("handle_rpc_response response: {}"
+                               .format(message))
+
         response: RPCResponse = \
             self._pending_requests.pop(message.correlation_id)
         response.response = message.message
         response.blocker.set()
-
-    def rpc_cast(self, receiver, message, callback):
-        pass

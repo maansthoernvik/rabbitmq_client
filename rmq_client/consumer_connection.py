@@ -1,11 +1,10 @@
-import logging
 import signal
 
 from threading import Thread
 from multiprocessing import Queue as IPCQueue
 
 from .consumer_channel import RMQConsumerChannel
-from .log import LogItem
+from .log import LogClient
 from .connection import RMQConnection
 
 
@@ -21,6 +20,7 @@ def create_consumer_connection(work_queue, consumed_messages, log_queue):
     :param IPCQueue consumed_messages: process shared queue used to forward
                                        messages received for a subscribed topic
                                        to the controlling process
+    :param log_queue: queue to post log writes to
     """
     consumer_connection = RMQConsumerConnection(work_queue, consumed_messages,
                                                 log_queue)
@@ -37,7 +37,7 @@ class RMQConsumerConnection(RMQConnection):
        messages can be read and handled by the controlling process.
     """
     # general
-    _log_queue: IPCQueue
+    _log_client: LogClient
 
     _channel: RMQConsumerChannel
 
@@ -59,11 +59,8 @@ class RMQConsumerConnection(RMQConnection):
         :param log_queue: process shared queue used to post messages to the
                           logging process
         """
-        self._log_queue = log_queue
-        self._log_queue.put(
-            LogItem("__init__", RMQConsumerConnection.__name__,
-                    level=logging.DEBUG)
-        )
+        self._log_client = LogClient(log_queue, RMQConsumerConnection.__name__)
+        self._log_client.debug("__init__")
 
         self._work_queue = work_queue
 
@@ -80,38 +77,35 @@ class RMQConsumerConnection(RMQConnection):
 
         :param pika.SelectConnection connection: established connection
         """
-        self._log_queue.put(
-            LogItem("on_connection_open connection: {}".format(connection),
-                    RMQConsumerConnection.__name__, level=logging.DEBUG)
-        )
+        self._log_client.info("on_connection_open connection: {}"
+                               .format(connection))
+
         self._channel.open_channel(connection, self.on_channel_open)
 
     def on_connection_closed(self, _connection, reason):
         """
+        Callback for when a connection is closed.
 
-        :param _connection:
-        :param reason:
+        :param _connection: connection that was closed
+        :param reason: reason for closing
         """
-        loglevel = logging.WARNING if not self._closing else logging.INFO
-
-        self._log_queue.put(
-            LogItem("on_connection_closed connection: {} reason: {}"
-                    .format(_connection, reason),
-                    RMQConsumerConnection.__name__, level=loglevel)
-        )
+        log_string = "on_connection_closed connection: {} reason: {}" \
+            .format(_connection, reason)
 
         if self._closing:
+            self._log_client.info(log_string)
             self.finalize_disconnect()
         else:
             # TODO: reconnect handling goes here
+            self._log_client.critical(log_string)
             self.finalize_disconnect()
 
     def on_channel_open(self):
-        self._log_queue.put(
-            LogItem("on_channel_open",
-                    RMQConsumerConnection.__name__,
-                    level=logging.DEBUG)
-        )
+        """
+        Callback for notifying a channel has been completely established.
+        """
+        self._log_client.debug("on_channel_open")
+
         self.consumer_connection_started()
 
     def consumer_connection_started(self):
@@ -120,10 +114,8 @@ class RMQConsumerConnection(RMQConnection):
         point where it is ready to receive work from its controlling process.
         In this case, when a channel has been established.
         """
-        self._log_queue.put(
-            LogItem("consumer_connection_started",
-                    RMQConsumerConnection.__name__)
-        )
+        self._log_client.info("consumer_connection_started")
+
         thread = Thread(target=self.monitor_work_queue, daemon=True)
         thread.start()
 
@@ -138,10 +130,8 @@ class RMQConsumerConnection(RMQConnection):
         Monitors the consumer connection's work queue and executes from it as
         soon as work is available.
         """
-        self._log_queue.put(
-            LogItem("monitor_work_queue", RMQConsumerConnection.__name__,
-                    level=logging.DEBUG)
-        )
+        self._log_client.debug("monitor_work_queue")
+
         # Blocking, set block=false to not block
         consume = self._work_queue.get()
         self._channel.handle_consume(consume)
@@ -154,9 +144,8 @@ class RMQConsumerConnection(RMQConnection):
         :param int _signum: signal.SIGINT
         :param ??? _frame: current stack frame
         """
-        self._log_queue.put(
-            LogItem("interrupt", RMQConsumerConnection.__name__)
-        )
+        self._log_client.debug("interrupt")
+
         self.disconnect()
 
     def terminate(self, _signum, _frame):
@@ -166,7 +155,6 @@ class RMQConsumerConnection(RMQConnection):
         :param int _signum: signal.SIGTERM
         :param ??? _frame: current stack frame
         """
-        self._log_queue.put(
-            LogItem("terminate", RMQConsumerConnection.__name__)
-        )
+        self._log_client.debug("terminate")
+
         self.disconnect()

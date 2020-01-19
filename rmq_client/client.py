@@ -3,19 +3,18 @@ import logging
 from multiprocessing import Queue as IPCQueue
 
 from .rpc import RMQRPCHandler
-from .log import LogHandler, LogItem
+from .log import LogHandler, LogClient
 from .consumer import RMQConsumer
 from .producer import RMQProducer
 
 
 class RMQClient:
     """
-    Class RMQClient
-
     Handles connection to RabbitMQ and provides and interface for applications
-    wanting to either publish
+    wanting to either publish, subscribe, or issue RPC requests.
     """
     _log_handler: LogHandler
+    _log_client: LogClient
 
     _rpc_handler: RMQRPCHandler
 
@@ -24,13 +23,13 @@ class RMQClient:
 
     def __init__(self, log_level=logging.WARNING):
         """
-        Initializes the RMQClient by initializing its member variables.
+        :param log_level: sets the log level of the RMQClient
         """
         self._log_handler = LogHandler(IPCQueue(),
                                        log_level=log_level)
-        self._log_handler.handle_log_item(
-            LogItem("__init__", RMQClient.__name__, level=logging.DEBUG)
-        )
+        self._log_client = LogClient(self._log_handler.get_log_queue(),
+                                     RMQClient.__name__)
+        self._log_client.debug("__init__")
 
         self._consumer = RMQConsumer(self._log_handler.get_log_queue())
         self._producer = RMQProducer(self._log_handler.get_log_queue())
@@ -41,30 +40,22 @@ class RMQClient:
 
     def start(self):
         """
-        Starts the RMQClient by starting its subsequent consumer, producer, and
-        RPC handler instances.
+        Starts the RMQClient by starting its subsequent consumer and producer
+        connections.
         """
-        self._log_handler.handle_log_item(
-            LogItem("start", RMQClient.__name__)
-        )
+        self._log_client.info("start")
         self._log_handler.start()
 
         self._consumer.start()
         self._producer.start()
 
-        self._rpc_handler.start()
-
     def stop(self):
         """
         Stops the RMQ client and its child applications/processes.
-        :return:
         """
-        self._log_handler.handle_log_item(
-            LogItem("stop", RMQClient.__name__)
-        )
+        self._log_client.info("stop")
         self._consumer.stop()
         self._producer.stop()
-        self._rpc_handler.stop()
 
     def subscribe(self, topic, callback):
         """
@@ -80,10 +71,8 @@ class RMQClient:
         :param str topic: topic to subscribe to
         :param callable callback: callback on message received
         """
-        self._log_handler.handle_log_item(
-            LogItem("Subscribe to topic: {}".format(topic),
-                    RMQClient.__name__, level=logging.DEBUG)
-        )
+        self._log_client.info("subscribe topic: {} callback: {}"
+                              .format(topic, callback))
         # dynamically add a subscription to a topic
         self._consumer.subscribe(topic, callback)
 
@@ -96,32 +85,61 @@ class RMQClient:
         :param str topic: topic to publish on
         :param str message: message to publish
         """
-        self._log_handler.handle_log_item(
-            LogItem("Publish to topic: {} message: {}".format(topic, message),
-                    RMQClient.__name__, level=logging.DEBUG)
-        )
+        self._log_client.info("publish to topic: {} message: {}"
+                              .format(topic, message))
         # publishes a message to the provided topic
         self._producer.publish(topic, message)
 
     def enable_rpc_server(self, rpc_queue_name, rpc_request_callback):
+        """
+        Enables an RPC server for the supplied RPC queue name. The client will
+        subscribe to messages on the supplied queue and relay incoming requests
+        to the supplied callback.
+
+            rpc_request_callback(message: bytes) -> bytes
+
+         !!! NOTE The importance of the supplied callback to RETURN bytes. !!!
+
+        :param rpc_queue_name: string name of the RPC request queue
+        :param rpc_request_callback: callback called upon incoming request
+        """
+        self._log_client.info("enable_rpc_server rpc_queue_name: {} "
+                              "rpc_request_callback: {}"
+                              .format(rpc_queue_name, rpc_request_callback))
         self._rpc_handler.enable_rpc_server(rpc_queue_name,
                                             rpc_request_callback)
 
     def enable_rpc_client(self):
+        """
+        Enables the client to act as an RPC client. This will make sure that
+        the client can handle sending RPC requests.
+        """
+        self._log_client.info("enable_rpc_client")
         self._rpc_handler.enable_rpc_client()
 
-    def rpc_call(self, receiver, message):
+    def rpc_call(self, receiver, message) -> bytes:
         """
+        NOTE! Must enable_rpc_client before making calls to this function.
 
-        :param receiver:
-        :param message:
-        :return:
+        Make a synchronous call to an RPC server.
+
+        :param receiver: name of the RPC server to send the request to
+        :param message: message to send to the RPC server
+        
+        :return answer: response message from the RPC server
         """
-        self._log_handler.handle_log_item(
-            LogItem("RPC call to receiver: {} message: {}"
-                    .format(receiver, message), RMQClient.__name__)
-        )
+        self._log_client.info("rpc_call receiver: {} message: {}"
+                              .format(receiver, message))
         return self._rpc_handler.rpc_call(receiver, message)
 
     def rpc_cast(self, receiver, message, callback):
+        """
+        NOTE! Must enable_rpc_client before making calls to this function.
+
+        Make an asynchronous call to an RPC server.
+
+        :param receiver: name of the RPC server to send the request to
+        :param message: message to send to the RPC server
+        :param callback: callback for when response is gotten
+        """
         raise NotImplementedError

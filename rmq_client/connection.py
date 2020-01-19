@@ -5,8 +5,6 @@ from abc import ABCMeta, abstractmethod
 
 class RMQConnection(metaclass=ABCMeta):
     """
-    Class RMQConnection
-
     Abstract class implementing the basics of a RabbitMQ server connection. This
     class does not meddle with channels as the handling of a channel may differ
     between consumers and producers. The RMQConnection class therefore only
@@ -15,7 +13,10 @@ class RMQConnection(metaclass=ABCMeta):
     Subclasses inheriting from RMQConnection have to override the
     on_connection_open(connection: SelectConnection) function to take over once
     the connection has been established. At this point, it is possible to start
-    creating channels.
+    creating channels. Subclasses also need to override
+    on_connection_closed(connection: SelectConnection, reason) since consumers
+    and producers differ quite a bit in how they handle their connection and
+    channels in event of an error.
     """
 
     _connection_parameters: pika.ConnectionParameters
@@ -86,6 +87,6 @@ class RMQConnection(metaclass=ABCMeta):
 
     def finalize_disconnect(self):
         """
-        Shall be called once the connection has been closed to stop the IOLoop.
+        Shall be called once the connection has been closed to stop the IO-Loop.
         """
         self._connection.ioloop.stop()

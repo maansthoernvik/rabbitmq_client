@@ -1,11 +1,10 @@
-import logging
 import signal
 
 from threading import Thread
 from multiprocessing import Queue as IPCQueue
 
 from .producer_channel import RMQProducerChannel
-from .log import LogItem
+from .log import LogClient
 from .connection import RMQConnection
 
 
@@ -18,6 +17,7 @@ def create_producer_connection(work_queue, log_queue):
 
     :param work_queue: process shared queue used to issue work for the
                        producer connection
+    :param log_queue: queue to post log writes to
     """
     producer_connection = RMQProducerConnection(work_queue, log_queue)
     producer_connection.connect()
@@ -25,15 +25,13 @@ def create_producer_connection(work_queue, log_queue):
 
 class RMQProducerConnection(RMQConnection):
     """
-    Class RMQProducerConnection
-
     This class handles a connection to a RabbitMQ server intended for a producer
     entity. Messages to be published are posted to a process shared queue which
     is read continuously by a connection process-local thread assigned to
     monitoring the queue.
     """
     # general
-    log_queue: IPCQueue
+    _log_client: LogClient
 
     # Connection
     _channel = None
@@ -51,10 +49,8 @@ class RMQProducerConnection(RMQConnection):
         :param log_queue: process shared queue used to post messages to the
                           logging process
         """
-        self._log_queue = log_queue
-        self._log_queue.put(
-            LogItem("__init__", RMQProducerConnection.__name__, level=logging.DEBUG)
-        )
+        self._log_client = LogClient(log_queue, RMQProducerConnection.__name__)
+        self._log_client.debug("__init__")
 
         self._work_queue = work_queue
 
@@ -71,33 +67,35 @@ class RMQProducerConnection(RMQConnection):
 
         :param pika.SelectConnection connection: established connection
         """
-        self._log_queue.put(
-            LogItem("on_connection_open connection: {}".format(connection),
-                    RMQProducerConnection.__name__, level=logging.DEBUG)
-        )
+        self._log_client.info("on_connection_open connection: {}"
+                               .format(connection))
+
         self._channel.open_channel(connection, self.on_channel_open)
 
     def on_connection_closed(self, _connection, reason):
-        loglevel = logging.WARNING if not self._closing else logging.INFO
+        """
+        Callback for when a connection is closed.
 
-        self._log_queue.put(
-            LogItem("on_connection_closed connection: {} reason: {}"
-                    .format(_connection, reason),
-                    RMQProducerConnection.__name__, level=loglevel)
-        )
+        :param _connection: connection that was closed
+        :param reason: reason for closing
+        """
+        log_string = "on_connection_closed connection: {} reason: {}" \
+            .format(_connection, reason)
 
         if self._closing:
+            self._log_client.info(log_string)
             self.finalize_disconnect()
         else:
             # TODO: reconnect handling goes here
+            self._log_client.critical(log_string)
             self.finalize_disconnect()
 
     def on_channel_open(self):
-        self._log_queue.put(
-            LogItem("on_channel_open",
-                    RMQProducerConnection.__name__,
-                    level=logging.DEBUG)
-        )
+        """
+        Callback for notifying a channel has been completely established.
+        """
+        self._log_client.debug("on_channel_open")
+
         self.producer_connection_started()
 
     def producer_connection_started(self):
@@ -106,10 +104,8 @@ class RMQProducerConnection(RMQConnection):
         it is ready to receive and execute work, for instance to publish
         messages.
         """
-        self._log_queue.put(
-            LogItem("producer_connection_started",
-                    RMQProducerConnection.__name__)
-        )
+        self._log_client.info("producer_connection_started")
+
         thread = Thread(target=self.monitor_work_queue, daemon=True)
         thread.start()
 
@@ -124,10 +120,8 @@ class RMQProducerConnection(RMQConnection):
         Monitors the producer connection's work queue and executes from it as
         soon as work is available.
         """
-        self._log_queue.put(
-            LogItem("monitor_work_queue", RMQProducerConnection.__name__,
-                    level=logging.DEBUG)
-        )
+        self._log_client.debug("monitor_work_queue")
+
         work = self._work_queue.get()
         self._channel.handle_work(work)
         self.monitor_work_queue()
@@ -139,9 +133,8 @@ class RMQProducerConnection(RMQConnection):
         :param int _signum: signal.SIGINT
         :param ??? _frame: current stack frame
         """
-        self._log_queue.put(
-            LogItem("interrupt", RMQProducerConnection.__name__)
-        )
+        self._log_client.debug("interrupt")
+
         self.disconnect()
 
     def terminate(self, _signum, _frame):
@@ -151,7 +144,6 @@ class RMQProducerConnection(RMQConnection):
         :param int _signum: signal.SIGTERM
         :param ??? _frame: current stack frame
         """
-        self._log_queue.put(
-            LogItem("terminate", RMQProducerConnection.__name__)
-        )
+        self._log_client.debug("terminate")
+
         self.disconnect()
