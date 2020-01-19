@@ -1,14 +1,11 @@
 import logging
 import signal
-import functools
-
-from pika.spec import Basic, BasicProperties
 
 from threading import Thread
 from multiprocessing import Queue as IPCQueue
 
+from .producer_channel import RMQProducerChannel
 from .log import LogItem
-from .defs import Publish, EXCHANGE_TYPE_FANOUT
 from .connection import RMQConnection
 
 
@@ -38,11 +35,6 @@ class RMQProducerConnection(RMQConnection):
     # general
     log_queue: IPCQueue
 
-    # confirm mode
-    # Keeps track of messages since Confirm.SelectOK
-    _expected_delivery_tag: int
-    _pending_confirm: dict  # messages that have not been confirmed yet
-
     # Connection
     _channel = None
 
@@ -64,70 +56,49 @@ class RMQProducerConnection(RMQConnection):
             LogItem("__init__", RMQProducerConnection.__name__, level=logging.DEBUG)
         )
 
-        self._expected_delivery_tag = 0
-        self._pending_confirm = dict()
-
         self._work_queue = work_queue
+
+        self._channel = RMQProducerChannel(log_queue)
 
         signal.signal(signal.SIGINT, self.interrupt)
         signal.signal(signal.SIGTERM, self.terminate)
 
         super().__init__()
 
-    def on_connection_open(self, _connection):
+    def on_connection_open(self, connection):
         """
         Callback when a connection has been established to the RMQ server.
 
-        :param pika.SelectConnection _connection: established connection
+        :param pika.SelectConnection connection: established connection
         """
         self._log_queue.put(
-            LogItem("on_connection_open connection: {}".format(_connection),
+            LogItem("on_connection_open connection: {}".format(connection),
                     RMQProducerConnection.__name__, level=logging.DEBUG)
         )
-        self._connection.channel(on_open_callback=self.on_channel_open)
+        self._channel.open_channel(connection, self.on_channel_open)
 
-    def on_channel_open(self, channel):
-        """
-        Callback for when a channel has been established on the connection.
+    def on_connection_closed(self, _connection, reason):
+        loglevel = logging.WARNING if not self._closing else logging.INFO
 
-        :param pika.channel.Channel channel: the opened channel
-        """
         self._log_queue.put(
-            LogItem("on_channel_open channel: {}".format(channel),
-                    RMQProducerConnection.__name__, level=logging.DEBUG)
-        )
-        self._channel = channel
-        self._channel.add_on_close_callback(self.on_channel_closed)
-
-        self._channel.confirm_delivery(
-            ack_nack_callback=self.on_delivery_confirmed,
-            callback=self.on_confirm_mode_activated
+            LogItem("on_connection_closed connection: {} reason: {}"
+                    .format(_connection, reason),
+                    RMQProducerConnection.__name__, level=loglevel)
         )
 
-    def on_confirm_mode_activated(self, _frame):
-        """
-        Callback for when confirm mode has been activated.
+        if self._closing:
+            self.finalize_disconnect()
+        else:
+            # TODO: reconnect handling goes here
+            self.finalize_disconnect()
 
-        :param pika.frame.Method _frame: message frame
-        """
+    def on_channel_open(self):
         self._log_queue.put(
-            LogItem("on_confirm_mode_activated frame: {}".format(_frame),
-                    RMQProducerConnection.__name__, level=logging.DEBUG)
-        )
-        self.producer_connection_started()
-
-    def on_channel_closed(self, channel, reason):
-        """
-        Callback for when a channel has been closed.
-
-        :param pika.channel.Channel channel: the channel that was closed
-        :param Exception reason: exception explaining why the channel was closed
-        """
-        self._log_queue.put(
-            LogItem("on_channel_closed channel: {} reason: {}"
-                    .format(channel, reason), RMQProducerConnection.__name__,
+            LogItem("on_channel_open",
+                    RMQProducerConnection.__name__,
                     level=logging.DEBUG)
         )
+        self.producer_connection_started()
 
     def producer_connection_started(self):
         """
@@ -158,124 +129,8 @@ class RMQProducerConnection(RMQConnection):
                     level=logging.DEBUG)
         )
         work = self._work_queue.get()
-        self.handle_work(work)
+        self._channel.handle_work(work)
         self.monitor_work_queue()
-
-    def handle_work(self, work):
-        """
-        Handler for work posted on the work_queue, dispatches the work depending
-        on the type of work.
-
-        :param Publish work: incoming work to be handled
-        """
-        self._log_queue.put(
-            LogItem("handle_work work: {}".format(work),
-                    RMQProducerConnection.__name__, level=logging.DEBUG)
-        )
-
-        if isinstance(work, Publish):
-            self.handle_publish(work)
-
-    def handle_publish(self, publish: Publish):
-        """
-        Handler for publishing work.
-
-        :param Publish publish: information about a publish
-        """
-        self._log_queue.put(
-            LogItem("handle_publish", RMQProducerConnection.__name__,
-                    level=logging.DEBUG)
-        )
-
-        if publish.attempts > publish.MAX_ATTEMPTS:
-            # If max attempts reached, abort publish and write to critical log
-            self._log_queue.put(
-                LogItem("handle_publish max attempts exceeded",
-                        RMQProducerConnection.__name__, level=logging.CRITICAL)
-            )
-            return
-
-        if publish.reply_to or publish.correlation_id:
-            self.publish(publish)
-
-        else:
-            cb = functools.partial(self.on_exchange_declared,
-                                   publish=publish)
-            self._channel.exchange_declare(exchange=publish.exchange,
-                                           exchange_type=EXCHANGE_TYPE_FANOUT,
-                                           callback=cb)
-
-    def on_delivery_confirmed(self, frame):
-        """
-        Callback for when a publish is confirmed
-
-        :param pika.frame.Method frame: message frame, either a Basic.Ack or
-                                        Basic.Nack
-        """
-        self._log_queue.put(
-            LogItem("on_delivery_confirmed frame: {}".format(frame),
-                    RMQProducerConnection.__name__, level=logging.DEBUG)
-        )
-        publish = self._pending_confirm.pop(frame.method.delivery_tag)
-
-        if isinstance(frame.method, Basic.Nack):
-            # Increment attempts and put back the publish on the work queue
-            self._work_queue.put(publish)
-
-        self._log_queue.put(
-            LogItem("on_delivery_confirmed pending confirms: {}"
-                    .format(self._pending_confirm),
-                    RMQProducerConnection.__name__,
-                    level=logging.DEBUG)
-        )
-
-    def on_exchange_declared(self, _frame, publish: Publish = None):
-        """
-        Callback for when an exchange has been declared.
-
-        :param pika.frame.Method _frame: message frame
-        :param str publish: additional parameter from functools.partial,
-                            used to carry the publish object
-        """
-        self._log_queue.put(
-            LogItem("on_exchange_declared frame: {} publish: {}"
-                    .format(_frame, publish), RMQProducerConnection.__name__,
-                    level=logging.DEBUG)
-        )
-        self.publish(publish)
-
-    def publish(self, publish: Publish):
-        """
-        Perform a publish operation.
-
-        :param Publish publish: the publish operation to perform
-        """
-        self._log_queue.put(
-            LogItem("publish: {}".format(publish),
-                    RMQProducerConnection.__name__)
-        )
-        self._expected_delivery_tag += 1
-        self._pending_confirm.update(
-            {self._expected_delivery_tag: publish.attempt()}
-        )
-
-        properties = BasicProperties(
-            reply_to=publish.reply_to,
-            correlation_id=publish.correlation_id
-        ) if publish.reply_to or publish.correlation_id else None
-
-        self._channel.basic_publish(
-            exchange=publish.exchange,
-            routing_key=publish.routing_key,
-            body=publish.message_content.encode('utf-8'),
-            properties=properties
-        )
-        self._log_queue.put(
-            LogItem("publish pending confirms: {}"
-                    .format(self._pending_confirm),
-                    RMQProducerConnection.__name__,
-                    level=logging.DEBUG)
-        )
 
     def interrupt(self, _signum, _frame):
         """
@@ -287,7 +142,6 @@ class RMQProducerConnection(RMQConnection):
         self._log_queue.put(
             LogItem("interrupt", RMQProducerConnection.__name__)
         )
-        self._closing = True
         self.disconnect()
 
     def terminate(self, _signum, _frame):
@@ -300,5 +154,4 @@ class RMQProducerConnection(RMQConnection):
         self._log_queue.put(
             LogItem("terminate", RMQProducerConnection.__name__)
         )
-        self._closing = True
         self.disconnect()

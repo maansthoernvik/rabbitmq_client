@@ -8,18 +8,21 @@ TEST_TOPIC_2 = "test2"
 
 
 def sub_callback(message):
-    print("test consumer got message: {}".format(message))
+    print("SUBSCRIBER got message: {}".format(message))
 
 
 def rpc_request_callback(message):
-    print("got RPC request: {}".format(message))
+    print("SERVER got RPC request: {}".format(message))
 
-    response = "default"
+    response = "default RPC server response"
 
-    if message == "test":
-        response = "42"
-    elif message == "testing":
-        response = "84"
+    return response
+
+
+def rpc_request_callback_2(message):
+    print("SERVER got RPC request: {}".format(message))
+
+    response = "RPC SERVER NUMBER TWO RESPONSE"
 
     return response
 
@@ -34,6 +37,7 @@ if __name__ == "__main__":
     client.subscribe(TEST_TOPIC_2, sub_callback)
 
     client.enable_rpc_server("rpc_server", rpc_request_callback)
+    #client.enable_rpc_server("rpc_server_2", rpc_request_callback_2)
     client.enable_rpc_client()
 
     try:
@@ -47,12 +51,11 @@ if __name__ == "__main__":
                 client.publish(TEST_TOPIC_2, "this is the message body")
 
             elif inp == "3":
-                reply = client.rpc_call("rpc_server", "testing RPC call")
+                reply = client.rpc_call("rpc_server", "testing RPC server")
                 print("Got RPC reply: {}".format(reply))
-                reply = client.rpc_call("rpc_server", "test")
-                print("Got RPC reply: {}".format(reply))
-                reply = client.rpc_call("rpc_server", "testing")
-                print("Got RPC reply: {}".format(reply))
+            elif inp == "4":
+                reply = client.rpc_call("rpc_server_2", "testing another RPC server")
+                print("CLIENT got RPC reply: {}".format(reply))
 
     except KeyboardInterrupt:
         pass

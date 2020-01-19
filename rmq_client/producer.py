@@ -2,8 +2,8 @@ import logging
 from multiprocessing import Queue as IPCQueue, Process
 
 from .log import LogItem
-from .defs import Publish
 from .producer_connection import create_producer_connection
+from .producer_defs import *
 
 
 class RMQProducer:
@@ -57,7 +57,7 @@ class RMQProducer:
         )
         self._connection_process.terminate()
 
-    def publish(self, topic, message, correlation_id=None, reply_to=None):
+    def publish(self, topic, message):
         """
         Publishes a message on the supplied topic.
 
@@ -67,7 +67,22 @@ class RMQProducer:
         self._log_queue.put(
             LogItem("publish", RMQProducer.__name__, level=logging.DEBUG)
         )
-        self._work_queue.put(Publish(message,
-                                     topic,
-                                     correlation_id=correlation_id,
-                                     reply_to=reply_to))
+        self._work_queue.put(Publish(topic, message))
+
+    def rpc_request(self, receiver, message, correlation_id, reply_to):
+        self._log_queue.put(
+            LogItem("rpc_request", RMQProducer.__name__, level=logging.DEBUG)
+        )
+        self._work_queue.put(RPCRequest(receiver,
+                                        message,
+                                        correlation_id,
+                                        reply_to))
+
+    def rpc_reply(self, receiver, message, correlation_id):
+        self._log_queue.put(
+            LogItem("rpc_reply", RMQProducer.__name__, level=logging.DEBUG)
+        )
+        self._work_queue.put(RPCResponse(receiver,
+                                         message,
+                                         correlation_id))
+

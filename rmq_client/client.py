@@ -103,8 +103,8 @@ class RMQClient:
         # publishes a message to the provided topic
         self._producer.publish(topic, message)
 
-    def enable_rpc_server(self, rpc_server_name, rpc_request_callback):
-        self._rpc_handler.enable_rpc_server(rpc_server_name,
+    def enable_rpc_server(self, rpc_queue_name, rpc_request_callback):
+        self._rpc_handler.enable_rpc_server(rpc_queue_name,
                                             rpc_request_callback)
 
     def enable_rpc_client(self):

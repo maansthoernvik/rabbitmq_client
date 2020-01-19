@@ -22,7 +22,6 @@ class RMQConnection(metaclass=ABCMeta):
     _connection: pika.SelectConnection
 
     _closing: bool
-    _connected: bool
 
     def __init__(self):
         """
@@ -38,7 +37,6 @@ class RMQConnection(metaclass=ABCMeta):
         )
 
         self._closing = False
-        self._connected = False
 
     def connect(self):
         """
@@ -59,19 +57,16 @@ class RMQConnection(metaclass=ABCMeta):
         """
         pass
 
+    @abstractmethod
     def on_connection_closed(self, _connection, reason):
         """
-        Callback upon closed connection.
+        Callback upon closed connection. Subclasses shall override this function
+        in order to be notified when a connection has been closed.
 
         :param pika.SelectConnection _connection: connection that was closed
         :param Exception reason: reason for closing
         """
-        print("connection closed: {}".format(reason))
-        if self._closing:
-            print("stopping ioloop")
-            self._connection.ioloop.stop()
-        else:
-            print("connection closed unexpectedly")
+        pass
 
     def disconnect(self):
         """
@@ -81,4 +76,16 @@ class RMQConnection(metaclass=ABCMeta):
         handling of either gracefully shutting down or re-connecting.
         """
         print("closing connection")
-        self._connection.close()
+
+        if not self._closing:
+            self._closing = True
+            self._connection.close()
+            return
+
+        print("connection is already closing")
+
+    def finalize_disconnect(self):
+        """
+        Shall be called once the connection has been closed to stop the IOLoop.
+        """
+        self._connection.ioloop.stop()

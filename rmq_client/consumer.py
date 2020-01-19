@@ -4,8 +4,21 @@ from multiprocessing import Queue as IPCQueue, Process
 from threading import Thread
 
 from .log import LogItem
-from .defs import Subscription, ConsumedMessage
 from .consumer_connection import create_consumer_connection
+from .consumer_defs import *
+
+
+class Consumer:
+    callback: callable
+    internal: bool  # Indicates that raw message shall be forwarded to consumer
+    exchange: str
+    routing_key: str
+
+    def __init__(self, callback, internal=False, exchange="", routing_key=""):
+        self.callback = callback
+        self.internal = internal
+        self.exchange = exchange
+        self.routing_key = routing_key
 
 
 class RMQConsumer:
@@ -25,8 +38,7 @@ class RMQConsumer:
     _monitoring_thread: Thread
     _log_queue: IPCQueue
 
-    # Pub/sub
-    _topic_callbacks: dict
+    _consumers: list
 
     # IPC
     _connection_process: Process
@@ -43,7 +55,7 @@ class RMQConsumer:
             LogItem("__init__", RMQConsumer.__name__, level=logging.DEBUG)
         )
 
-        self._topic_callbacks = dict()
+        self._consumers = list()
 
         self._work_queue = IPCQueue()
         self._consumed_messages = IPCQueue()
@@ -77,10 +89,7 @@ class RMQConsumer:
             LogItem("consume", RMQConsumer.__name__, level=logging.DEBUG)
         )
         message = self._consumed_messages.get()
-
-        if isinstance(message, ConsumedMessage):
-            self.handle_message(message)
-
+        self.handle_message(message)
         self.consume()
 
     def handle_message(self, message: ConsumedMessage):
@@ -94,10 +103,13 @@ class RMQConsumer:
             LogItem("handle_message got: {}".format(message),
                     RMQConsumer.__name__)
         )
-        if message.correlation_id:
-            self._topic_callbacks.get(message.topic)(message)
-        else:
-            self._topic_callbacks.get(message.topic)(message.message_content)
+        for consumer in self._consumers:
+            if message.exchange == consumer.exchange and \
+                    message.routing_key == consumer.routing_key:
+                if consumer.internal:  # Internal consumer, forward raw
+                    consumer.callback(message)
+                else:  # Only message content
+                    consumer.callback(message.message)
 
     def stop(self):
         """
@@ -108,7 +120,7 @@ class RMQConsumer:
         )
         self._connection_process.terminate()
 
-    def subscribe(self, topic, callback, sub_type=Subscription.TOPIC):
+    def subscribe(self, topic, callback):
         """
         Subscribes to messages sent to the named topic. Messages received on
         this topic will be dispatched to the provided callback.
@@ -120,7 +132,6 @@ class RMQConsumer:
 
         :param str topic: topic to subscribe to
         :param callable callback: callback on message received
-        :param sub_type: type of subscription to be made
         """
         # 1. Add callback to be called when event on that topic + routing_key
         # 2. Request a subscription on the new topic towards the consumer
@@ -128,5 +139,26 @@ class RMQConsumer:
         self._log_queue.put(
             LogItem("subscribe", RMQConsumer.__name__, level=logging.DEBUG)
         )
-        self._topic_callbacks.update({topic: callback})
-        self._work_queue.put(Subscription(topic=topic, sub_type=sub_type))
+
+        self._consumers.append(Consumer(callback, exchange=topic))
+        self._work_queue.put(Subscription(topic))
+
+    def rpc_server(self, queue_name, callback):
+        self._log_queue.put(
+            LogItem("rpc_server", RMQConsumer.__name__, level=logging.DEBUG)
+        )
+
+        self._consumers.append(Consumer(callback,
+                                        internal=True,
+                                        routing_key=queue_name))
+        self._work_queue.put(RPCServer(queue_name))
+
+    def rpc_client(self, queue_name, callback):
+        self._log_queue.put(
+            LogItem("rpc_client", RMQConsumer.__name__, level=logging.DEBUG)
+        )
+
+        self._consumers.append(Consumer(callback,
+                                        internal=True,
+                                        routing_key=queue_name))
+        self._work_queue.put(RPCClient(queue_name))
