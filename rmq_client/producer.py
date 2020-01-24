@@ -62,13 +62,14 @@ class RMQProducer:
         self._log_client.info("stop")
 
         self._connection_process.terminate()
+        self._connection_process.join(timeout=2)
 
     def publish(self, topic, message):
         """
         Publishes a message on the supplied topic.
 
         :param str topic: topic to publish on
-        :param str message: message content
+        :param bytes message: message content
         """
         self._log_client.debug("publish")
 

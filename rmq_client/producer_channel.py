@@ -116,6 +116,11 @@ class RMQProducerChannel:
         """
         self._log_client.debug("handle_work work: {}".format(work))
 
+        if max_attempts_reached(work):
+            self._log_client.critical("handle_rpc_response max attempts "
+                                      "reached for: {}".format(work))
+            return
+
         if isinstance(work, Publish):
             self.handle_publish(work)
         elif isinstance(work, RPCRequest):
@@ -131,12 +136,6 @@ class RMQProducerChannel:
         """
         self._log_client.debug("handle_publish")
 
-        if max_attempts_reached(publish):
-            # If max attempts reached, abort publish and write to critical log
-            self._log_client.critical("handle_publish max attempts reached for:"
-                                      " {}".format(publish))
-            return
-
         cb = functools.partial(self.on_exchange_declared,
                                publish=publish)
         self._channel.exchange_declare(exchange=publish.topic,
@@ -151,12 +150,6 @@ class RMQProducerChannel:
         """
         self._log_client.debug("handle_rpc_request")
 
-        if max_attempts_reached(rpc_request):
-            # If max attempts reached, abort publish and write to critical log
-            self._log_client.critical("handle_rpc_request max attempts reached "
-                                      "for: {}".format(rpc_request))
-            return
-
         self.rpc_request(rpc_request)
 
     def handle_rpc_response(self, rpc_response: RPCResponse):
@@ -166,11 +159,6 @@ class RMQProducerChannel:
         :param rpc_response: information about the RPC response
         """
         self._log_client.debug("handle_rpc_response")
-
-        if max_attempts_reached(rpc_response):
-            self._log_client.critical("handle_rpc_response max attempts "
-                                      "reached for: {}".format(rpc_response))
-            return
 
         self.rpc_response(rpc_response)
 
@@ -184,6 +172,7 @@ class RMQProducerChannel:
         """
         self._log_client.debug("on_exchange_declared frame: {}"
                                .format(_frame))
+
         self.publish(publish)
 
     def publish(self, publish):
@@ -245,7 +234,7 @@ class RMQProducerChannel:
         )
 
         self._channel.basic_publish(
-            exchange="",
+            exchange=DEFAULT_EXCHANGE,
             routing_key=rpc_response.receiver,
             properties=BasicProperties(
                 correlation_id=rpc_response.correlation_id

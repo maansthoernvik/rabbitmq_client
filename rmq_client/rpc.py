@@ -1,6 +1,5 @@
 import uuid
 
-from multiprocessing import Queue as IPCQueue
 from threading import Event
 
 from .common_defs import Printable
@@ -12,6 +11,8 @@ from .producer import RMQProducer
 
 RPC_REPLY_PREFIX = "RPC-REPLY-"
 
+RPC_DEFAULT_REPLY = "NONE"
+
 
 class RPCResponse(Printable):
 
@@ -20,7 +21,7 @@ class RPCResponse(Printable):
 
     def __init__(self):
         self.blocker = Event()
-        self.response = "NONE"
+        self.response = RPC_DEFAULT_REPLY
 
 
 class RMQRPCHandler:

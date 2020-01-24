@@ -78,7 +78,7 @@ class RMQConsumerConnection(RMQConnection):
         :param pika.SelectConnection connection: established connection
         """
         self._log_client.info("on_connection_open connection: {}"
-                               .format(connection))
+                              .format(connection))
 
         self._channel.open_channel(connection, self.on_channel_open)
 

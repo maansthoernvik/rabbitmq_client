@@ -76,14 +76,10 @@ class RMQConnection(metaclass=ABCMeta):
         being invoked once the connection has been closed, allowing for further
         handling of either gracefully shutting down or re-connecting.
         """
-        print("closing connection")
-
         if not self._closing:
             self._closing = True
             self._connection.close()
             return
-
-        print("connection is already closing")
 
     def finalize_disconnect(self):
         """

@@ -32,7 +32,7 @@ class Publish(GenProduce):
     def __init__(self, topic, message):
         """
         :param topic: publishing topic
-        :param message: message to publish
+        :param bytes message: message to publish
         """
         self.topic = topic
         self.message = message

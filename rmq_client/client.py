@@ -76,6 +76,18 @@ class RMQClient:
         # dynamically add a subscription to a topic
         self._consumer.subscribe(topic, callback)
 
+    def is_subscribed(self, topic) -> bool:
+        """
+        Checks if a subscription has been activated, meaning RMQ has confirmed
+        with a ConsumeOk that a consume is active.
+
+        :param topic: topic to check
+        :return: true if active
+        """
+        self._log_client.debug("is_subscribed topic: {}".format(topic))
+
+        return self._consumer.is_subscribed(topic)
+
     def publish(self, topic, message):
         """
         Publishes a message on the given topic. The publising work is dispatched
@@ -83,7 +95,7 @@ class RMQClient:
         time this function returns.
 
         :param str topic: topic to publish on
-        :param str message: message to publish
+        :param bytes message: message to publish
         """
         self._log_client.info("publish to topic: {} message: {}"
                               .format(topic, message))

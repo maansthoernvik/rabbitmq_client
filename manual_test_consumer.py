@@ -29,7 +29,7 @@ def rpc_request_callback_2(message):
 
 if __name__ == "__main__":
     print("instantiating RMQ client")
-    client = RMQClient(log_level=logging.INFO)
+    client = RMQClient(log_level=logging.DEBUG)
     print("starting RMQ client")
     client.start()
 

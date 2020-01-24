@@ -1,9 +1,12 @@
 import functools
 from multiprocessing import Queue as IPCQueue
 
-from .consumer_defs import Subscription, RPCServer, RPCClient, ConsumedMessage
+from .consumer_defs import Subscription, RPCServer, RPCClient, ConsumedMessage, \
+    ConsumeOk
 from .common_defs import AUTO_GEN_QUEUE_NAME, EXCHANGE_TYPE_FANOUT
 from .log import LogClient
+
+from pika.spec import FRAME_METHOD
 
 
 class RMQConsumerChannel:
@@ -148,7 +151,7 @@ class RMQConsumerChannel:
         elif isinstance(consume, RPCServer) or \
                 isinstance(consume, RPCClient):
             # No exchange = no need to bind the queue
-            self.consume(frame.method.queue)
+            self.consume(consume)
 
     def on_queue_bound(self, _frame, consume):
         """
@@ -161,19 +164,24 @@ class RMQConsumerChannel:
         self._log_client.debug("on_queue_bound frame: {} consume: {}"
                                .format(_frame, consume))
 
-        self.consume(consume.queue_name)
+        self.consume(consume)
 
-    def consume(self, queue_name):
+    def consume(self, consume):
         """
         Starts consuming on the parameter queue.
 
-        :param str queue_name: name of the queue to consume from
+        :param consume: consume action
         """
         self._log_client.info("consume queue_name: {}"
-                               .format(queue_name))
+                              .format(consume.queue_name))
 
+        cb = functools.partial(self.on_consume_ok,
+                               consume=consume)
         # All consumes so far are exclusive.
-        self._channel.basic_consume(queue_name, self.on_message, exclusive=True)
+        self._channel.basic_consume(consume.queue_name,
+                                    self.on_message,
+                                    exclusive=True,
+                                    callback=cb)
 
     def on_message(self, _channel, basic_deliver, properties, body):
         """
@@ -196,3 +204,16 @@ class RMQConsumerChannel:
         )
 
         self._channel.basic_ack(basic_deliver.delivery_tag)
+
+    def on_consume_ok(self, frame, consume):
+        """
+        Callback for when confirm mode has been activated.
+
+        :param pika.spec.Method frame: message frame
+        :param consume: issued consume
+        """
+        self._log_client.info("on_consume_ok frame: {}".format(frame))
+
+        self._consumed_messages.put(
+            ConsumeOk(frame.method.consumer_tag, consume)
+        )

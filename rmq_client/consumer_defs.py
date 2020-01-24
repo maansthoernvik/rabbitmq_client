@@ -1,12 +1,28 @@
 from .common_defs import Printable
 
 
-class Subscription(Printable):
+class Consumer(Printable):
+    """
+    Base class for consumers
+    """
+    queue_name: str
+
+    def set_queue_name(self, queue_name):
+        """
+        Setter for queue_name
+
+        :param queue_name: new queue_name
+        :return: new consumer_tag
+        """
+        self.queue_name = queue_name
+        return self.queue_name
+
+
+class Subscription(Consumer):
     """
     A subscription work item.
     """
     topic: str
-    queue_name: str
 
     def __init__(self, topic):
         """
@@ -14,21 +30,11 @@ class Subscription(Printable):
         """
         self.topic = topic
 
-    def set_queue_name(self, queue_name):
-        """
-        Setter for queue_name.
 
-        :param queue_name: new queue_name
-        """
-        self.queue_name = queue_name
-        return self.queue_name
-
-
-class RPCServer(Printable):
+class RPCServer(Consumer):
     """
     An RPCServer work item.
     """
-    queue_name: str
 
     def __init__(self, queue_name):
         """
@@ -37,11 +43,10 @@ class RPCServer(Printable):
         self.queue_name = queue_name
 
 
-class RPCClient(Printable):
+class RPCClient(Consumer):
     """
     An RPCClient work item.
     """
-    queue_name: str
 
     def __init__(self, queue_name):
         """
@@ -91,3 +96,19 @@ class ConsumedMessage(Printable):
 
         if reply_to:
             self.reply_to = reply_to
+
+
+class ConsumeOk(Printable):
+    """
+    Confirmation of a completed consume
+    """
+    consumer_tag: str
+    consume = None  # A consume work item
+
+    def __init__(self, consumer_tag, consume):
+        """
+        :param consumer_tag: consumer tag used for cancellation
+        :param consume: consume issued
+        """
+        self.consumer_tag = consumer_tag
+        self.consume = consume

@@ -6,7 +6,7 @@ from .consumer_connection import create_consumer_connection
 from .consumer_defs import *
 
 
-class Consumer:
+class Consumer(Printable):
     """
     Used to package what makes up a consumer to the RMQConsumer class. This
     class is instantiated when a new subscription is made.
@@ -19,6 +19,7 @@ class Consumer:
     internal: bool  # Indicates that raw message shall be forwarded to consumer
     exchange: str
     routing_key: str
+    consumer_tag: str
 
     def __init__(self, callback, internal=False, exchange="", routing_key=""):
         """
@@ -33,6 +34,16 @@ class Consumer:
         self.internal = internal
         self.exchange = exchange
         self.routing_key = routing_key
+
+    def set_consumer_tag(self, new_consumer_tag):
+        """
+        Setter for consumer_tag
+
+        :param new_consumer_tag: new consumer_tag
+        :return: new consumer_tag
+        """
+        self.consumer_tag = new_consumer_tag
+        return self.consumer_tag
 
 
 class RMQConsumer:
@@ -108,7 +119,12 @@ class RMQConsumer:
         self._log_client.debug("consume")
 
         message = self._consumed_messages.get()
-        self.handle_message(message)
+
+        if isinstance(message, ConsumedMessage):
+            self.handle_message(message)
+        elif isinstance(message, ConsumeOk):
+            self.handle_consume_ok(message)
+
         self.consume()
 
     def handle_message(self, message: ConsumedMessage):
@@ -128,6 +144,32 @@ class RMQConsumer:
                 else:  # Only message content
                     consumer.callback(message.message)
 
+    def handle_consume_ok(self, message: ConsumeOk):
+        """
+        Defines handling for a received ConsumeOk message, meaning a consume
+        has been successfully started for a consumer.
+
+        :param message: contains information about the started consumer
+        """
+        self._log_client.info("handle_consume_ok message: {}".format(message))
+
+        if isinstance(message.consume, Subscription):
+            # filter out subscription consumer and set consumer_tag
+            [consumer.set_consumer_tag(message.consumer_tag)
+             for consumer in self._consumers
+             if consumer.exchange == message.consume.topic]
+        else:  # RPCServer or RPCClient
+            [consumer.set_consumer_tag(message.consumer_tag)
+             for consumer in self._consumers
+             if consumer.routing_key == message.consume.queue_name]
+
+        consumer_state = ""
+        for consumer in self._consumers:
+            consumer_state = consumer_state + "\n\t{}".format(consumer)
+
+        self._log_client.debug("handle_consume_ok new consumer state: {}"
+                               .format(consumer_state))
+
     def stop(self):
         """
         Stops the RMQConsumer, tearing down the RMQConsumerConnection process.
@@ -135,6 +177,7 @@ class RMQConsumer:
         self._log_client.info("stop")
 
         self._connection_process.terminate()
+        self._connection_process.join(timeout=2)
 
     def subscribe(self, topic, callback):
         """
@@ -157,7 +200,33 @@ class RMQConsumer:
         self._consumers.append(Consumer(callback, exchange=topic))
         self._work_queue.put(Subscription(topic))
 
+    def is_subscribed(self, topic):
+        """
+        Checks if a subscription has been activated, meaning RMQ has confirmed
+        with a ConsumeOk that a consume is active.
+
+        :param topic: topic to check
+        :return: true if active
+        """
+        result = len([consumer for consumer in self._consumers
+                      if consumer.exchange == topic and
+                      hasattr(consumer, 'consumer_tag')]) > 0
+
+        self._log_client.debug("is_subscribed {}".format(result))
+
+        return result
+
     def rpc_server(self, queue_name, callback):
+        """
+        Starts an RPC server by issuing a subscribe request to the consumer
+        connection.
+
+        The internal flag ensures that the raw ConsumedMessage object is
+        forwarded to the supplied callback function.
+
+        :param queue_name: RPC server request queue name
+        :param callback: callback on message received
+        """
         self._log_client.debug("rpc_server")
 
         self._consumers.append(Consumer(callback,
@@ -166,6 +235,16 @@ class RMQConsumer:
         self._work_queue.put(RPCServer(queue_name))
 
     def rpc_client(self, queue_name, callback):
+        """
+        Starts an RPC client by issuing a subscribe request to the consumer
+        connection.
+
+        The internal flag ensures that the raw ConsumedMessage object is
+        forwarded to the supplied callback function.
+
+        :param queue_name: RPC client response queue name
+        :param callback: callback on message received
+        """
         self._log_client.debug("rpc_client")
 
         self._consumers.append(Consumer(callback,
