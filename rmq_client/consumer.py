@@ -113,19 +113,17 @@ class RMQConsumer:
 
     def consume(self):
         """
-        Recursively monitors the consumed_messages queue for any incoming
-        messages.
+        Monitors the consumed_messages queue for any incoming messages.
         """
-        self._log_client.debug("consume")
+        while True:
+            self._log_client.debug("consume waiting for new messages")
 
-        message = self._consumed_messages.get()
+            message = self._consumed_messages.get()
 
-        if isinstance(message, ConsumedMessage):
-            self.handle_message(message)
-        elif isinstance(message, ConsumeOk):
-            self.handle_consume_ok(message)
-
-        self.consume()
+            if isinstance(message, ConsumedMessage):
+                self.handle_message(message)
+            elif isinstance(message, ConsumeOk):
+                self.handle_consume_ok(message)
 
     def handle_message(self, message: ConsumedMessage):
         """

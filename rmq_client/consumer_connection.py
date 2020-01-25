@@ -130,12 +130,12 @@ class RMQConsumerConnection(RMQConnection):
         Monitors the consumer connection's work queue and executes from it as
         soon as work is available.
         """
-        self._log_client.debug("monitor_work_queue")
+        while True:
+            self._log_client.debug("monitor_work_queue waiting for work")
 
-        # Blocking, set block=false to not block
-        consume = self._work_queue.get()
-        self._channel.handle_consume(consume)
-        self.monitor_work_queue()  # Recursive call
+            # Blocking, set block=false to not block
+            consume = self._work_queue.get()
+            self._channel.handle_consume(consume)
 
     def interrupt(self, _signum, _frame):
         """

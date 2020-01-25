@@ -152,9 +152,10 @@ class LogHandler:
         starts an infinite loop of monitoring the _log_queue for new items to
         log.
         """
-        log_item = self._log_queue.get()
-        self.handle_log_item(log_item)
-        self._monitor_log_queue()  # Recursive call
+        while True:
+            # Blocking, set block=False to not block
+            log_item = self._log_queue.get()
+            self.handle_log_item(log_item)
 
     def handle_log_item(self, log_item: LogItem):
         """
