@@ -15,11 +15,15 @@ RPC_DEFAULT_REPLY = b'NONE'
 
 
 class RPCResponse(Printable):
+    """
+    RPC response object spec.
+    """
 
-    blocker: Event
-    response: bytes
+    blocker: Event  # used to wait for response
+    response: bytes  # defaults to RPC_DEFAULT_REPLY if no response in time
 
     def __init__(self):
+        """"""
         self.blocker = Event()
         self.response = RPC_DEFAULT_REPLY
 
@@ -194,7 +198,7 @@ class RMQRPCHandler:
 
         self._producer.rpc_response(message.reply_to,
                                     answer,
-                                    correlation_id=message.correlation_id)
+                                    message.correlation_id)
 
     def handle_rpc_response(self, message: ConsumedMessage):
         """

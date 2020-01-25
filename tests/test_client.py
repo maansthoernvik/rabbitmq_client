@@ -4,6 +4,7 @@ import unittest
 import threading
 
 from rmq_client.client import RMQClient
+from rmq_client import rpc
 
 
 # RPC definitions
@@ -209,6 +210,8 @@ class TestSubscription(unittest.TestCase):
 
         self.client.publish(TEST_TOPIC_1, b'message')
         self.client.publish(TEST_TOPIC_2, b'message')
+        self.client.publish(TEST_TOPIC_3, b'message')
+        self.client.publish(TEST_TOPIC_4, b'message')
 
         event.wait(timeout=1)
 
@@ -233,7 +236,7 @@ class TestRPC(unittest.TestCase):
         self.client = RMQClient()
         self.client.start()
 
-    def test_rpc_server(self):
+    def test_rpc(self):
         """
         Tests the functionality of the RPC server and client.
         """
@@ -245,6 +248,25 @@ class TestRPC(unittest.TestCase):
         response = self.client.rpc_call(RPC_SERVER_NAME, b'message')
 
         self.assertEqual(b'answer', response)
+
+    def test_rpc_call_non_existent_server(self):
+        """
+        Tests issuing a call to a non-existent server
+        """
+        self.client.enable_rpc_server(RPC_SERVER_NAME, rpc_request_handler)
+        self.client.enable_rpc_client()
+        wait_until_rpc_ready(self, self.client, "server")
+        wait_until_rpc_ready(self, self.client, "client")
+
+        response = self.client.rpc_call("BULLSHIT", b'message')
+
+        self.assertEqual(response, rpc.RPC_DEFAULT_REPLY)
+
+        # test one request to the correct queue name as well to see nothing is
+        # broken.
+        response = self.client.rpc_call(RPC_SERVER_NAME, b'message')
+
+        self.assertEqual(response, b'answer')
 
     def tearDown(self):
         """
