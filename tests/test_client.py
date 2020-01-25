@@ -1,4 +1,5 @@
 import time
+import random
 import unittest
 import threading
 
@@ -91,7 +92,6 @@ class TestSubscription(unittest.TestCase):
 
         time_waited = 0.0
         timeout = 5.0
-        print("Starting to wait")
         while len(topic_1_messages) < number_of_messages_per_topic and \
                 len(topic_2_messages) < number_of_messages_per_topic:
             if time_waited > timeout:
@@ -105,10 +105,64 @@ class TestSubscription(unittest.TestCase):
         Tests multiple messages being sent to multiple topics at the same time
         and in different orders.
         """
+        random.seed()
+
         topic_1_messages = []
         topic_2_messages = []
         topic_3_messages = []
         topic_4_messages = []
+        number_of_messages_per_topic = 20
+
+        def subscription_callback_1(message):
+            topic_1_messages.append(message)
+
+        def subscription_callback_2(message):
+            topic_2_messages.append(message)
+
+        def subscription_callback_3(message):
+            topic_3_messages.append(message)
+
+        def subscription_callback_4(message):
+            topic_4_messages.append(message)
+
+        self.client.subscribe(TEST_TOPIC_1, subscription_callback_1)
+        self.client.subscribe(TEST_TOPIC_2, subscription_callback_2)
+        self.client.subscribe(TEST_TOPIC_3, subscription_callback_3)
+        self.client.subscribe(TEST_TOPIC_4, subscription_callback_4)
+
+        wait_until_subscribed(self, self.client, TEST_TOPIC_1)
+        wait_until_subscribed(self, self.client, TEST_TOPIC_2)
+        wait_until_subscribed(self, self.client, TEST_TOPIC_3)
+        wait_until_subscribed(self, self.client, TEST_TOPIC_4)
+
+        i = 0
+        while i < (number_of_messages_per_topic * 4):
+            random_topic = random.choice([
+                TEST_TOPIC_1, TEST_TOPIC_2, TEST_TOPIC_3, TEST_TOPIC_4
+            ])
+
+            self.client.publish(random_topic, b'message')
+            i += 1
+
+        time_waited = 0.0
+        timeout = 5.0
+        while len(topic_1_messages +
+                  topic_2_messages +
+                  topic_3_messages +
+                  topic_4_messages) < number_of_messages_per_topic * 4:
+            if time_waited > timeout:
+                self.fail("Took too long to receive messages")
+
+            time.sleep(0.1)
+            time_waited += 0.1
+
+        # At least some message was sent to each topic... Could use some better
+        # verification, but difficult to make stable due to the random nature
+        # of the test.
+        self.assertNotEqual(len(topic_1_messages), 0)
+        self.assertNotEqual(len(topic_2_messages), 0)
+        self.assertNotEqual(len(topic_3_messages), 0)
+        self.assertNotEqual(len(topic_4_messages), 0)
 
     def tearDown(self) -> None:
         """
