@@ -191,6 +191,29 @@ class TestSubscription(unittest.TestCase):
         self.assertNotEqual(len(topic_3_messages), 0)
         self.assertNotEqual(len(topic_4_messages), 0)
 
+    def test_publish_to_other_topic_than_subscription(self):
+        """
+        Tests publishing to a different topic than what is subscribed to,
+        assuming that the message will not be received by the consumer.
+        """
+        gotten_messages = 0
+        event = threading.Event()
+
+        def subscription_callback_1(message):
+            nonlocal gotten_messages
+
+            gotten_messages += 1
+
+        self.client.subscribe(TEST_TOPIC_1, subscription_callback_1)
+        wait_until_subscribed(self, self.client, TEST_TOPIC_1)
+
+        self.client.publish(TEST_TOPIC_1, b'message')
+        self.client.publish(TEST_TOPIC_2, b'message')
+
+        event.wait(timeout=1)
+
+        self.assertEqual(gotten_messages, 1)
+
     def tearDown(self):
         """
         Stops the client to release allocated resources at the end of each test.

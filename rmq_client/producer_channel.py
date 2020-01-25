@@ -259,7 +259,7 @@ class RMQProducerChannel:
         delivery_tag = self._expected_delivery_tag
 
         self._log_client.info("_delivery_tag new tag: {}"
-                               .format(self._expected_delivery_tag))
+                              .format(self._expected_delivery_tag))
 
         self._delivery_tag_lock.release()
 
