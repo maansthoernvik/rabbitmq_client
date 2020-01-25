@@ -43,8 +43,13 @@ class TestClient(unittest.TestCase):
 
         self.client.subscribe(TEST_TOPIC_1, subscription_callback)
 
+        time_waited = 0.0
         while not self.client.is_subscribed(TEST_TOPIC_1):
+            if time_waited > 2.0:
+                self.fail("Did not subscribe in time")
+
             time.sleep(0.1)
+            time_waited += 0.1
 
         self.client.publish(TEST_TOPIC_1, expected_message)
 
