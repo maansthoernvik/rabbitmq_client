@@ -140,6 +140,9 @@ class LogHandler:
         self.logger.addHandler(file_handler)
 
     def start(self):
+        """
+        Starts the log handler by monitoring its work queue.
+        """
         thread = Thread(target=self._monitor_log_queue, daemon=True)
         thread.start()
 
@@ -154,8 +157,19 @@ class LogHandler:
         self._monitor_log_queue()  # Recursive call
 
     def handle_log_item(self, log_item: LogItem):
+        """
+        Handles a single log item by dispatching it to the designated logger
+        instance.
+
+        :param log_item: log item to handle
+        """
         msg = "{}  {}".format(log_item.app_name, log_item.content)
         self.logger.log(log_item.level, msg)
 
     def get_log_queue(self):
+        """
+        Getter for _log_queue.
+
+        :return: the handler's log queue
+        """
         return self._log_queue
