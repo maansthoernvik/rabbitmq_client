@@ -45,16 +45,16 @@ if __name__ == "__main__":
             inp = input()
 
             if inp == "1":
-                client.publish(TEST_TOPIC_1, "this is the message body")
+                client.publish(TEST_TOPIC_1, b"this is the message body")
 
             elif inp == "2":
-                client.publish(TEST_TOPIC_2, "this is the message body")
+                client.publish(TEST_TOPIC_2, b"this is the message body")
 
             elif inp == "3":
-                reply = client.rpc_call("rpc_server", "testing RPC server")
+                reply = client.rpc_call("rpc_server", b"testing RPC server")
                 print("Got RPC reply: {}".format(reply))
             elif inp == "4":
-                reply = client.rpc_call("rpc_server_2", "testing another RPC server")
+                reply = client.rpc_call("rpc_server_2", b"testing another RPC server")
                 print("CLIENT got RPC reply: {}".format(reply))
 
     except KeyboardInterrupt:

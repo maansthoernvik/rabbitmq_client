@@ -11,13 +11,13 @@ from .producer import RMQProducer
 
 RPC_REPLY_PREFIX = "RPC-REPLY-"
 
-RPC_DEFAULT_REPLY = "NONE"
+RPC_DEFAULT_REPLY = b'NONE'
 
 
 class RPCResponse(Printable):
 
     blocker: Event
-    response: str
+    response: bytes
 
     def __init__(self):
         self.blocker = Event()
@@ -91,6 +91,21 @@ class RMQRPCHandler:
         self._consumer.rpc_server(self._request_queue_name,
                                   self.handle_rpc_request)
 
+    def is_rpc_server_ready(self) -> bool:
+        """
+        Checks if the RPC server is ready, meaning it is consuming on the RPC
+        server queue.
+
+        :return: True if ready
+        """
+        self._log_client.debug("is_rpc_server_ready")
+
+        # If no request queue exists, definitively not ready.
+        if not self._request_queue_name:
+            return False
+
+        return self._consumer.is_rpc_consumer_ready(self._request_queue_name)
+
     def enable_rpc_client(self):
         """
         Enables the client to act as an RPC client. This will establish a reply
@@ -103,18 +118,34 @@ class RMQRPCHandler:
 
         self._pending_requests = dict()
         self._response_queue_name = RPC_REPLY_PREFIX + str(uuid.uuid1())
-        self._consumer.rpc_client(self._response_queue_name, self.handle_rpc_response)
+        self._consumer.rpc_client(self._response_queue_name,
+                                  self.handle_rpc_response)
 
-    def rpc_call(self, receiver, message):
+    def is_rpc_client_ready(self) -> bool:
+        """
+        Check if the RPC client is ready, meaning it is consuming on the RPC
+        client's reply queue.
+
+        :return: True if ready
+        """
+        self._log_client.debug("is_rpc_client_ready")
+
+        # If no response queue exists, definitively not ready.
+        if not self._response_queue_name:
+            return False
+
+        return self._consumer.is_rpc_consumer_ready(self._response_queue_name)
+
+    def rpc_call(self, receiver, message) -> bytes:
         """
         NOTE! Must enable_rpc_client before making calls to this function.
 
         Make a synchronous call to an RPC server.
 
-        :param receiver: name of the RPC server to send the request to
-        :param message: message to send to the RPC server
+        :param str receiver: name of the RPC server to send the request to
+        :param bytes message: message to send to the RPC server
 
-        :return answer: response message from the RPC server
+        :return bytes answer: response message from the RPC server
         """
         self._log_client.debug("rpc_call")
 

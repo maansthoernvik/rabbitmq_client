@@ -206,9 +206,14 @@ class RMQConsumer:
         :param topic: topic to check
         :return: true if active
         """
-        result = len([consumer for consumer in self._consumers
-                      if consumer.exchange == topic and
-                      hasattr(consumer, 'consumer_tag')]) > 0
+        result = False
+
+        for consumer in self._consumers:
+            if not consumer.internal:
+                if consumer.exchange == topic and \
+                   hasattr(consumer, 'consumer_tag'):
+                    result = True
+                    break
 
         self._log_client.debug("is_subscribed {}".format(result))
 
@@ -231,6 +236,25 @@ class RMQConsumer:
                                         internal=True,
                                         routing_key=queue_name))
         self._work_queue.put(RPCServer(queue_name))
+
+    def is_rpc_consumer_ready(self, server_name) -> bool:
+        """
+        Checks if the RPC server is ready.
+
+        :return: True if ready
+        """
+        result = False
+
+        for consumer in self._consumers:
+            if consumer.internal:
+                if consumer.routing_key == server_name and \
+                   hasattr(consumer, 'consumer_tag'):
+                    result = True
+                    break
+
+        self._log_client.debug("is_rpc_consumer_ready {}".format(result))
+
+        return result
 
     def rpc_client(self, queue_name, callback):
         """

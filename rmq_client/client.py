@@ -121,6 +121,17 @@ class RMQClient:
         self._rpc_handler.enable_rpc_server(rpc_queue_name,
                                             rpc_request_callback)
 
+    def is_rpc_server_ready(self) -> bool:
+        """
+        Checks if the RPC server is ready, meaning it is consuming on the RPC
+        server queue.
+
+        :return: True if ready
+        """
+        self._log_client.info("is_rpc_server_ready")
+
+        return self._rpc_handler.is_rpc_server_ready()
+
     def enable_rpc_client(self):
         """
         Enables the client to act as an RPC client. This will make sure that
@@ -129,16 +140,27 @@ class RMQClient:
         self._log_client.info("enable_rpc_client")
         self._rpc_handler.enable_rpc_client()
 
+    def is_rpc_client_ready(self) -> bool:
+        """
+        Check if the RPC client is ready, meaning it is consuming on the RPC
+        client's reply queue.
+
+        :return: True if ready
+        """
+        self._log_client.info("is_rpc_client_ready")
+
+        return self._rpc_handler.is_rpc_client_ready()
+
     def rpc_call(self, receiver, message) -> bytes:
         """
         NOTE! Must enable_rpc_client before making calls to this function.
 
         Make a synchronous call to an RPC server.
 
-        :param receiver: name of the RPC server to send the request to
-        :param message: message to send to the RPC server
+        :param str receiver: name of the RPC server to send the request to
+        :param bytes message: message to send to the RPC server
         
-        :return answer: response message from the RPC server
+        :return bytes answer: response message from the RPC server
         """
         self._log_client.info("rpc_call receiver: {} message: {}"
                               .format(receiver, message))

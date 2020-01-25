@@ -6,25 +6,52 @@ import threading
 from rmq_client.client import RMQClient
 
 
+# RPC definitions
+RPC_SERVER_NAME = "rpc_test_server"
+
+
 def rpc_request_handler(message):
     return "answer".encode('utf-8')
 
 
+def wait_until_rpc_ready(test, client, rpc_type, timeout=2.0):
+    time_waited = 0.0
+
+    if rpc_type == "server":
+        while not client.is_rpc_server_ready():
+            if time_waited > timeout:
+                test.fail("RPC server not ready in time")
+
+            time.sleep(0.1)
+            time_waited += 0.1
+
+    elif rpc_type == "client":
+        while not client.is_rpc_client_ready():
+            if time_waited > timeout:
+                test.fail("RPC client not ready in time")
+
+            time.sleep(0.1)
+            time_waited += 0.1
+# RPC definitions end
+
+
+# Subscription definitions
+TEST_TOPIC_1 = "topic1"
+TEST_TOPIC_2 = "topic2"
+TEST_TOPIC_3 = "topic3"
+TEST_TOPIC_4 = "topic4"
+
+
 def wait_until_subscribed(test, client, topic, timeout=2.0):
     time_waited = 0.0
+
     while not client.is_subscribed(topic):
         if time_waited > timeout:
             test.fail("Did not subscribe in time")
 
         time.sleep(0.1)
         time_waited += 0.1
-
-
-TEST_TOPIC_1 = "topic1"
-TEST_TOPIC_2 = "topic2"
-TEST_TOPIC_3 = "topic3"
-TEST_TOPIC_4 = "topic4"
-RPC_SERVER_NAME = "rpc_server"
+# Subscriptions definitions end
 
 
 class TestSubscription(unittest.TestCase):
@@ -111,7 +138,7 @@ class TestSubscription(unittest.TestCase):
         topic_2_messages = []
         topic_3_messages = []
         topic_4_messages = []
-        number_of_messages_per_topic = 20
+        number_of_messages_per_topic = 100
 
         def subscription_callback_1(message):
             topic_1_messages.append(message)
@@ -164,7 +191,39 @@ class TestSubscription(unittest.TestCase):
         self.assertNotEqual(len(topic_3_messages), 0)
         self.assertNotEqual(len(topic_4_messages), 0)
 
-    def tearDown(self) -> None:
+    def tearDown(self):
+        """
+        Stops the client to release allocated resources at the end of each test.
+        """
+        self.client.stop()
+
+
+class TestRPC(unittest.TestCase):
+    """
+    Tests for the client interface for RPC.
+    """
+
+    def setUp(self):
+        """
+        Initializes the client for each test case.
+        """
+        self.client = RMQClient()
+        self.client.start()
+
+    def test_rpc_server(self):
+        """
+        Tests the functionality of the RPC server and client.
+        """
+        self.client.enable_rpc_server(RPC_SERVER_NAME, rpc_request_handler)
+        self.client.enable_rpc_client()
+        wait_until_rpc_ready(self, self.client, "server")
+        wait_until_rpc_ready(self, self.client, "client")
+
+        response = self.client.rpc_call(RPC_SERVER_NAME, b'message')
+
+        self.assertEqual(b'answer', response)
+
+    def tearDown(self):
         """
         Stops the client to release allocated resources at the end of each test.
         """
