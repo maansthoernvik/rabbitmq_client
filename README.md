@@ -1,4 +1,5 @@
 # RabbitMQ client based on pika
+[![PyPI version](https://badge.fury.io/py/rabbitmq-client.svg)](https://badge.fury.io/py/rabbitmq-client)
 
 This repository offers a RabbitMQ client based on pika. Its purpose is to
 provide an extremely simple API with which to interact with RabbitMQ. The idea
