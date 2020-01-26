@@ -1,6 +1,6 @@
 import logging
 
-from rmq_client.client import RMQClient
+from rabbitmq_client.client import RMQClient
 
 
 TEST_TOPIC_1 = "test1"

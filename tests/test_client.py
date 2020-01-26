@@ -3,8 +3,8 @@ import random
 import unittest
 import threading
 
-from rmq_client.client import RMQClient
-from rmq_client import rpc
+from rabbitmq_client.client import RMQClient
+from rabbitmq_client import rpc
 
 
 # RPC definitions
