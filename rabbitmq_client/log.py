@@ -130,7 +130,7 @@ class LogHandler:
 
         self.logger = logging.getLogger(LOGGER_NAME)
         self.logger.setLevel(log_level)
-        
+
         file_handler = logging.FileHandler("rabbitmq_client.log", mode=filemode)
         file_handler.setLevel(log_level)
         # Padding log level name to 8 characters, CRITICAL is the longest,
