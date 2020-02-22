@@ -1,6 +1,10 @@
 import pika
+import logging
 
 from abc import ABCMeta, abstractmethod
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class RMQConnection(metaclass=ABCMeta):
@@ -29,6 +33,8 @@ class RMQConnection(metaclass=ABCMeta):
         Initializes the RMQ connection with connection parameters and the
         general state of the RMQConnection adapter.
         """
+        LOGGER.debug("__init__ of connection")
+
         self._connection_parameters = pika.ConnectionParameters()
 
         self._connection = pika.SelectConnection(
@@ -45,6 +51,8 @@ class RMQConnection(metaclass=ABCMeta):
         connection's IO-loop. Starting the IO-loop will connect to the RabbitMQ
         server as configured in __init__.
         """
+        LOGGER.debug("connect in connection")
+
         self._connection.ioloop.start()
 
     @abstractmethod
@@ -76,6 +84,8 @@ class RMQConnection(metaclass=ABCMeta):
         being invoked once the connection has been closed, allowing for further
         handling of either gracefully shutting down or re-connecting.
         """
+        LOGGER.debug("disconnect in connection")
+
         if not self._closing:
             self._closing = True
             self._connection.close()
@@ -85,4 +95,6 @@ class RMQConnection(metaclass=ABCMeta):
         """
         Shall be called once the connection has been closed to stop the IO-Loop.
         """
+        LOGGER.debug("finalizing disconnect")
+
         self._connection.ioloop.stop()

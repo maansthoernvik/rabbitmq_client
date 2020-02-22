@@ -1,106 +1,59 @@
 import logging
+from logging.handlers import QueueListener
 
 from multiprocessing import Queue as IPCQueue
-from threading import Thread
 
 
-LOGGER_NAME = "rabbitmq_client"
+TOP_LOGGER_NAME = "rabbitmq_client"
+
+_log_manager = None
 
 
-class LogItem:
+def initialize_log_manager(log_level=None):
     """
-    Encapsulates information of a log entry.
+    Initializes logging for the RabbitMQ client.
+
+    :param log_level: log level to use
     """
-    level = logging.INFO
-    content: str
-    app_name: str  # Name of logging instance
+    if log_level is not None:
+        global _log_manager
+        _log_manager = LogManager(log_level)
+        _log_manager.start()
 
-    def __init__(self, content, app_name, level=logging.INFO):
-        """
-        Initializes a LogItem to be handled by a LogHandler.
-
-        :param content: log message string.
-        :param app_name: logging application's name.
-        :param level: level of logging operation. logging.INFO by default.
-        """
-        self.level = level
-        self.content = content
-        self.app_name = app_name
+        logger = logging.getLogger(TOP_LOGGER_NAME)
+        handler = logging.handlers.QueueHandler(_log_manager.get_log_queue())
+        handler.setLevel(log_level)
+        logger.addHandler(handler)
 
 
-class LogClient:
+def set_process_log_handler(queue):
     """
-    Used as a proxy for the log queue which each part of the RMQ Client uses.
-    This way, some of the repeated code gets put in one place and reduces the
-    space taken by each write.
+    Sets up the processes "root" logger. Well, at least the root of the
+    rabbitmq_client project. Queue will be None in case logging is deactivated.
+
+    :param queue: multiprocessing queue to instantiate the QueueHandler with
     """
+    if queue is not None:
+        logger = logging.getLogger(TOP_LOGGER_NAME)
+        handler = logging.handlers.QueueHandler(queue)
+        # Top level handler will take care of filtering out irrelevant levels
+        handler.setLevel(logging.DEBUG)
 
-    _log_queue: IPCQueue
-    _app_name: str
-
-    def __init__(self, log_queue, app_name):
-        """
-        :param log_queue: queue which log entries get put in
-        :param app_name: application name to tag every log entry
-        """
-        self._log_queue = log_queue
-        self._app_name = app_name
-
-    def get_log_queue(self):
-        return self._log_queue
-
-    def debug(self, message):
-        """
-        Logs a debug message.
-
-        :param message: message to log.
-        """
-        self._log_queue.put(
-            LogItem(message, self._app_name, level=logging.DEBUG)
-        )
-
-    def info(self, message):
-        """
-        Logs an info message.
-
-        :param message: message to log.
-        """
-        self._log_queue.put(
-            LogItem(message, self._app_name, level=logging.INFO)
-        )
-
-    def warning(self, message):
-        """
-        Logs a warning message.
-
-        :param message: message to log.
-        """
-        self._log_queue.put(
-            LogItem(message, self._app_name, level=logging.WARNING)
-        )
-
-    def error(self, message):
-        """
-        Logs an error message.
-
-        :param message: message to log.
-        """
-        self._log_queue.put(
-            LogItem(message, self._app_name, level=logging.ERROR)
-        )
-
-    def critical(self, message):
-        """
-        Logs a critical message.
-
-        :param message: message to log.
-        """
-        self._log_queue.put(
-            LogItem(message, self._app_name, level=logging.CRITICAL)
-        )
+        # Clear all previous handlers, important in case of forking method
+        logger.handlers = []
+        logger.addHandler(handler)
 
 
-class LogHandler:
+def get_log_queue():
+    """
+    Interface for getting the multiprocessing queue for logging messages.
+
+    :return: log queue or None if logging is deactivated
+    """
+    return _log_manager.get_log_queue() if _log_manager is not None else None
+
+
+class LogManager:
     """
     This class makes sure that all the processes spawned by the RMQClient can
     use a centralized logging solution. This class' member queue is monitored
@@ -108,65 +61,40 @@ class LogHandler:
     LogHandler then takes care of.
     """
 
-    _log_queue: IPCQueue
-
-    def __init__(self, log_queue: IPCQueue, log_level, filemode='w'):
+    def __init__(self, log_level, filemode='w'):
         """
         Initializes the log handler by creating a process shared queue.
 
-        :param log_queue: the IPCQueue which the RMQ client intends to use to
-                          post LogItems to the LogHandler.
-        :param log_level: minimum log level which will result in written log
-                          contents on file.
+        :param log_level: sets the log level for the log manager
         :type  log_level: logging.DEBUG | logging.INFO | logging.WARNING |
                           logging.ERROR | logging.CRITICAL
         :param filemode: either write or append. Write will overwrite all
                          previous contents.
         :type  filemode: 'w' | 'a'
         """
-        self._log_queue = log_queue
-
-        self._log_level = log_level
-
-        self.logger = logging.getLogger(LOGGER_NAME)
-        self.logger.setLevel(log_level)
-
-        file_handler = logging.FileHandler("rabbitmq_client.log", mode=filemode)
+        file_handler = logging.FileHandler(
+            "rabbitmq_client.log", mode=filemode
+        )
         file_handler.setLevel(log_level)
         # Padding log level name to 8 characters, CRITICAL is the longest,
         # centered log level by '^'.
-        formatter = logging.Formatter(fmt='{asctime} - {levelname:^8} - '
-                                          '{message}', style='{')
+        formatter = logging.Formatter(fmt="{asctime} {levelname:^8}: "
+                                          "{message}",
+                                      style="{",
+                                      datefmt="%d/%m/%Y %H:%M:%S")
         file_handler.setFormatter(formatter)
-        self.logger.addHandler(file_handler)
+
+        self._log_queue = IPCQueue()
+
+        self._listener = QueueListener(
+            self._log_queue, file_handler, respect_handler_level=True
+        )
 
     def start(self):
         """
-        Starts the log handler by monitoring its work queue.
+        Starts the log manager by starting the listener on the log queue.
         """
-        thread = Thread(target=self._monitor_log_queue, daemon=True)
-        thread.start()
-
-    def _monitor_log_queue(self):
-        """
-        Shall only be the target of the LogHandler's start method. This function
-        starts an infinite loop of monitoring the _log_queue for new items to
-        log.
-        """
-        while True:
-            # Blocking, set block=False to not block
-            log_item = self._log_queue.get()
-            self.handle_log_item(log_item)
-
-    def handle_log_item(self, log_item: LogItem):
-        """
-        Handles a single log item by dispatching it to the designated logger
-        instance.
-
-        :param log_item: log item to handle
-        """
-        msg = "{}  {}".format(log_item.app_name, log_item.content)
-        self.logger.log(log_item.level, msg)
+        self._listener.start()
 
     def get_log_queue(self):
         """

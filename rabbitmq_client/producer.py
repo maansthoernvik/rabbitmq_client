@@ -1,8 +1,13 @@
+import logging
+
 from multiprocessing import Queue as IPCQueue, Process
 
-from .log import LogClient
 from .producer_connection import create_producer_connection
 from .producer_defs import *
+from rabbitmq_client import log
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class RMQProducer:
@@ -22,22 +27,22 @@ class RMQProducer:
     than actually doing something useful. Only instantiates work items and puts
     them on the work queue.
     """
-    # general
-    _log_client: LogClient
-
-    # IPC
-    _connection_process: Process
-
-    _work_queue: IPCQueue
-
-    def __init__(self, log_queue):
-        """
-        :param log_queue: queue to post logs to
-        """
-        self._log_client = LogClient(log_queue, RMQProducer.__name__)
-        self._log_client.debug("__init__")
+    
+    def __init__(self):
+        """"""
+        LOGGER.debug("__init__")
 
         self._work_queue = IPCQueue()
+
+        self._connection_process = Process(
+            target=create_producer_connection,
+            args=(
+                self._work_queue,
+
+                # This is fine since we're still in the same process!
+                log.get_log_queue()
+            )
+        )
 
     def start(self):
         """
@@ -47,19 +52,15 @@ class RMQProducer:
         for the controlling process to issue commands to the connection process,
         for example to publish messages.
         """
-        self._log_client.info("start")
+        LOGGER.info("start")
 
-        self._connection_process = Process(
-            target=create_producer_connection,
-            args=(self._work_queue, self._log_client.get_log_queue())
-        )
         self._connection_process.start()
 
     def stop(self):
         """
         Stops the RMQConsumer, tearing down the RMQProducerConnection process.
         """
-        self._log_client.info("stop")
+        LOGGER.info("stop")
 
         self._connection_process.terminate()
         self._connection_process.join(timeout=2)
@@ -71,7 +72,7 @@ class RMQProducer:
         :param str topic: topic to publish on
         :param bytes message: message content
         """
-        self._log_client.debug("publish")
+        LOGGER.debug("publish")
 
         self._work_queue.put(Publish(topic, message))
 
@@ -84,10 +85,9 @@ class RMQProducer:
         :param correlation_id: identifies the request
         :param reply_to: response queue name
         """
-        self._log_client.info("rpc_request receiver: {} message: {} "
-                              "correlation_id: {} reply_to: {}"
-                              .format(receiver, message, correlation_id,
-                                      reply_to))
+        LOGGER.info("rpc_request receiver: {} message: {} "
+                    "correlation_id: {} reply_to: {}"
+                    .format(receiver, message, correlation_id, reply_to))
 
         self._work_queue.put(RPCRequest(receiver,
                                         message,
@@ -102,11 +102,10 @@ class RMQProducer:
         :param message: contents to send
         :param correlation_id: identifies which request the response belongs to
         """
-        self._log_client.info("rpc_reply receiver: {} message: {} "
-                              "correlation_id: {}".format(receiver, message,
-                                                          correlation_id))
+        LOGGER.info("rpc_reply receiver: {} message: {} "
+                    "correlation_id: {}".format(receiver, message,
+                                                correlation_id))
 
         self._work_queue.put(RPCResponse(receiver,
                                          message,
                                          correlation_id))
-
