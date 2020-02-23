@@ -2,9 +2,11 @@ import logging
 
 from multiprocessing import Queue as IPCQueue, Process
 
+from rabbitmq_client import log
+
+from .log import LogManager
 from .producer_connection import create_producer_connection
 from .producer_defs import *
-from rabbitmq_client import log
 
 
 LOGGER = logging.getLogger(__name__)
@@ -34,13 +36,16 @@ class RMQProducer:
 
         self._work_queue = IPCQueue()
 
+        log_manager: LogManager = log.get_log_manager()
+
         self._connection_process = Process(
             target=create_producer_connection,
             args=(
                 self._work_queue,
 
                 # This is fine since we're still in the same process!
-                log.get_log_queue()
+                log_manager.log_queue,
+                log_manager.log_level
             )
         )
 

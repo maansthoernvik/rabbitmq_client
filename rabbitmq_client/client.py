@@ -2,6 +2,7 @@ import logging
 
 from rabbitmq_client import log
 
+from .log import LogManager
 from .rpc import RMQRPCHandler
 from .consumer import RMQConsumer
 from .producer import RMQProducer
@@ -23,8 +24,9 @@ class RMQClient:
         """
         log.initialize_log_manager(log_level=log_level)
 
+        log_manager: LogManager = log.get_log_manager()
         # Client process log handler is set here!
-        log.set_process_log_handler(log.get_log_queue())
+        log.set_process_log_handler(log_manager.log_queue, log_level)
 
         self._consumer = RMQConsumer()
         self._producer = RMQProducer()

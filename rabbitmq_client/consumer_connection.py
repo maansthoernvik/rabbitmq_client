@@ -12,7 +12,10 @@ from rabbitmq_client import log
 LOGGER = logging.getLogger(__name__)
 
 
-def create_consumer_connection(work_queue, consumed_messages, log_queue):
+def create_consumer_connection(work_queue,
+                               consumed_messages,
+                               log_queue,
+                               log_level):
     """
     Interface function to instantiate and connect a consumer connection. This
     function is intended as a target for a new process to avoid having to
@@ -25,9 +28,10 @@ def create_consumer_connection(work_queue, consumed_messages, log_queue):
                                        messages received for a subscribed topic
                                        to the controlling process
     :param log_queue: queue to post log writes to
+    :param log_level: log level
     """
     # Configure logging
-    log.set_process_log_handler(log_queue)
+    log.set_process_log_handler(log_queue, log_level)
 
     consumer_connection = RMQConsumerConnection(work_queue, consumed_messages)
     consumer_connection.connect()

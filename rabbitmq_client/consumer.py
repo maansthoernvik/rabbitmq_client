@@ -3,9 +3,11 @@ import logging
 from multiprocessing import Queue as IPCQueue, Process
 from threading import Thread
 
+from rabbitmq_client import log
+
+from .log import LogManager
 from .consumer_connection import create_consumer_connection
 from .consumer_defs import *
-from rabbitmq_client import log
 
 
 LOGGER = logging.getLogger(__name__)
@@ -84,14 +86,17 @@ class RMQConsumer:
         self._work_queue = IPCQueue()
         self._consumed_messages = IPCQueue()
 
+        # This is fine since we're still in the same process!
+        log_manager: LogManager = log.get_log_manager()
+
         self._connection_process = Process(
             target=create_consumer_connection,
             args=(
                 self._work_queue,
                 self._consumed_messages,
 
-                # This is fine since we're still in the same process!
-                log.get_log_queue()
+                log_manager.log_queue,
+                log_manager.log_level
             )
         )
 

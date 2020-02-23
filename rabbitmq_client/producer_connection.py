@@ -12,7 +12,7 @@ from rabbitmq_client import log
 LOGGER = logging.getLogger(__name__)
 
 
-def create_producer_connection(work_queue, log_queue):
+def create_producer_connection(work_queue, log_queue, log_level):
     """
     Interface function to instantiate and connect a producer connection. This
     function is intended as a target for a new process to avoid having to
@@ -22,9 +22,10 @@ def create_producer_connection(work_queue, log_queue):
     :param work_queue: process shared queue used to issue work for the
                        producer connection
     :param log_queue: queue to post log writes to
+    :param log_level: log level
     """
     # Configure logging
-    log.set_process_log_handler(log_queue)
+    log.set_process_log_handler(log_queue, log_level)
 
     producer_connection = RMQProducerConnection(work_queue)
     producer_connection.connect()
