@@ -98,6 +98,11 @@ class ConsumedMessage(Printable):
             self.reply_to = reply_to
 
 
+class StopConsumer(Printable):
+    """Tells the consumer to stop."""
+    pass
+
+
 class ConsumeOk(Printable):
     """
     Confirmation of a completed consume

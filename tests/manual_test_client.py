@@ -1,6 +1,9 @@
 import logging
 import sys
 import os
+import signal
+import time
+import threading
 
 # For testing, needed to import "../rabbitmq_client".
 sys.path.append(os.path.abspath(".."))
@@ -33,34 +36,73 @@ def rpc_request_callback_2(message):
 
 
 if __name__ == "__main__":
+
+    print(f"Threads before test program start: {threading.active_count()}")
+
     print("instantiating RMQ client")
     client = RMQClient(log_level=logging.DEBUG)
     print("starting RMQ client")
     client.start()
 
+    print(f"Threads after client start: {threading.active_count()}")
+
+    def interrupt(frame, signal):
+        print("Interrupting test program")
+        client.stop()
+
+        print(f"Threads after client stop: {threading.active_count()}")
+        for t in threading.enumerate():
+            print(t)
+
+        raise Exception("Stopping")
+
+    print("Registering INTERRUPT handler")
+    signal.signal(signal.SIGINT, interrupt)
+
+    print(f"Subscribe to {TEST_TOPIC_1} and {TEST_TOPIC_2}")
     client.subscribe(TEST_TOPIC_1, sub_callback)
     client.subscribe(TEST_TOPIC_2, sub_callback)
 
+    print("Enabling RPC server to listen on rpc_server")
     client.enable_rpc_server("rpc_server", rpc_request_callback)
-    #client.enable_rpc_server("rpc_server_2", rpc_request_callback_2)
+
+    print("Enabling RPC client")
     client.enable_rpc_client()
 
     try:
         while True:
             inp = input()
 
-            if inp == "1":
+            if inp == "pub-1":
+                print(f"Publish to: {TEST_TOPIC_1}")
                 client.publish(TEST_TOPIC_1, b"this is the message body")
 
-            elif inp == "2":
+            elif inp == "pub-2":
+                print(f"Publish to: {TEST_TOPIC_2}")
                 client.publish(TEST_TOPIC_2, b"this is the message body")
 
-            elif inp == "3":
+            elif inp == "rpc-exists":
+                print("RPC call to: rpc_server")
                 reply = client.rpc_call("rpc_server", b"testing RPC server")
                 print("Got RPC reply: {}".format(reply))
-            elif inp == "4":
+
+            elif inp == "rpc-does-not-exist":
+                print("RPC call to: rpc_server_2")
                 reply = client.rpc_call("rpc_server_2", b"testing another RPC server")
                 print("CLIENT got RPC reply: {}".format(reply))
 
-    except KeyboardInterrupt:
-        pass
+            elif inp == "list-threads":
+                print(f"Threads started: {threading.active_count()}")
+                for t in threading.enumerate():
+                    print(t)
+
+            elif inp == "stop":
+                print("Stopping client")
+                client.stop()
+
+            elif inp == "exit":
+                print("Stopping test program")
+                break
+
+    except Exception:
+        print("Exiting test loop")

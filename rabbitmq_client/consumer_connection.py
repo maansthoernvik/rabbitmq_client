@@ -66,6 +66,7 @@ class RMQConsumerConnection(RMQConnection):
         self._work_queue = work_queue
 
         self._channel = RMQConsumerChannel(consumed_messages)
+        self._work_thread = Thread(target=self.monitor_work_queue, daemon=True)
 
         signal.signal(signal.SIGINT, self.interrupt)
         signal.signal(signal.SIGTERM, self.terminate)
@@ -116,8 +117,7 @@ class RMQConsumerConnection(RMQConnection):
         """
         LOGGER.info("consumer_connection_started")
 
-        thread = Thread(target=self.monitor_work_queue, daemon=True)
-        thread.start()
+        self._work_thread.start()
 
     def monitor_work_queue(self):
         """
@@ -145,8 +145,7 @@ class RMQConsumerConnection(RMQConnection):
         :param ??? _frame: current stack frame
         """
         LOGGER.debug("interrupt")
-
-        self.disconnect()
+        self.stop()
 
     def terminate(self, _signum, _frame):
         """
@@ -156,5 +155,8 @@ class RMQConsumerConnection(RMQConnection):
         :param ??? _frame: current stack frame
         """
         LOGGER.debug("terminate")
+        self.stop()
 
+    def stop(self):
+        """General stop handler function."""
         self.disconnect()

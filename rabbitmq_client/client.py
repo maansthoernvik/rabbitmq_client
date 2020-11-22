@@ -49,8 +49,13 @@ class RMQClient:
         Stops the RMQ client and its child applications/processes.
         """
         LOGGER.info("stop")
+
         self._consumer.stop()
         self._producer.stop()
+
+        # Logging messages from consumer and producer are lost if logging is
+        # not closed last.
+        log.get_log_manager().stop()
 
     def subscribe(self, topic, callback):
         """
@@ -153,7 +158,7 @@ class RMQClient:
 
         :param str receiver: name of the RPC server to send the request to
         :param bytes message: message to send to the RPC server
-        
+
         :return bytes answer: response message from the RPC server
         """
         LOGGER.info("rpc_call receiver: {} message: {}"

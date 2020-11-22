@@ -47,16 +47,21 @@ def set_process_log_handler(queue, log_level):
     :param log_level: log level that the logger and associated handler should
                       handle
     """
+    # Found in test case when running them one after the other. If one test
+    # case has enabled logging, the rabbitmq_client logger has an assigned
+    # QueueHandler referring to an old IPC Queue.
+
+    # This also works as a way of clearning all handlers when a new process is
+    # forked.
+    logger = logging.getLogger(TOP_LOGGER_NAME)
+    logger.handlers = []
+
     if queue is not None:
-        logger = logging.getLogger(TOP_LOGGER_NAME)
         logger.setLevel(log_level)
 
         handler = logging.handlers.QueueHandler(queue)
         handler.setLevel(log_level)
 
-        # Clear all previous handlers, important in case of forking method for
-        # creating new processes
-        logger.handlers = []
         logger.addHandler(handler)
 
 
@@ -83,22 +88,22 @@ class LogManager:
 
         if self.log_level is not None:
 
-            file_handler = logging.FileHandler(
+            self.file_handler = logging.FileHandler(
                 "rabbitmq_client.log", mode=filemode
             )
-            file_handler.setLevel(log_level)
+            self.file_handler.setLevel(log_level)
             # Padding log level name to 8 characters, CRITICAL is the longest,
             # centered log level by '^'.
             formatter = logging.Formatter(fmt="{asctime} {levelname:^8} "
                                               "{module} {message}",
                                           style="{",
                                           datefmt="%d/%m/%Y %H:%M:%S")
-            file_handler.setFormatter(formatter)
+            self.file_handler.setFormatter(formatter)
 
             self._log_queue = IPCQueue()
 
             self._listener = QueueListener(
-                self._log_queue, file_handler, respect_handler_level=True
+                self._log_queue, self.file_handler, respect_handler_level=True
             )
 
     def start(self):
@@ -106,6 +111,23 @@ class LogManager:
         Starts the log manager by starting the listener on the log queue.
         """
         self._listener.start()
+
+    def stop(self):
+        """Stops the log manager."""
+        if self.log_level is not None:
+            self._listener.stop()
+
+            # To avoid resource warnings, the file handler must be explicitly
+            # closed.
+            self.file_handler.close()
+
+            # flush and close queue
+            while not self._log_queue.empty():
+                self._log_queue.get()
+            self._log_queue.close()
+            # In order for client.stop() to be reliable and consistent, ensure
+            # thread stop.
+            self._log_queue.join_thread()
 
     @property
     def log_queue(self):

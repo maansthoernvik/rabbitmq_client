@@ -128,6 +128,29 @@ class RMQConsumer:
                 self.handle_message(message)
             elif isinstance(message, ConsumeOk):
                 self.handle_consume_ok(message)
+            elif isinstance(message, StopConsumer):
+                self.flush_and_close_queues()
+                break
+
+
+    def flush_and_close_queues(self):
+        """
+        Flushed process shared queues in an attempt to stop background threads.
+        """
+        while not self._consumed_messages.empty():
+            self._consumed_messages.get()
+        self._consumed_messages.close()
+        # In order for client.stop() to be reliable and consistent, ensure
+        # thread stop.
+        self._consumed_messages.join_thread()
+
+        while not self._work_queue.empty():
+            self._work_queue.get()
+        self._work_queue.close()
+        # In order for client.stop() to be reliable and consistent, ensure
+        # thread stop.
+        self._work_queue.join_thread()
+
 
     def handle_message(self, message: ConsumedMessage):
         """
@@ -177,6 +200,9 @@ class RMQConsumer:
         Stops the RMQConsumer, tearing down the RMQConsumerConnection process.
         """
         LOGGER.info("stop")
+
+        self._consumed_messages.put(StopConsumer())
+        self._monitoring_thread.join()
 
         self._connection_process.terminate()
         self._connection_process.join(timeout=2)

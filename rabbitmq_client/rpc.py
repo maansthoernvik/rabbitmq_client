@@ -173,7 +173,7 @@ class RMQRPCHandler:
         :param message: message to send to the RPC server
         :param callback: callback for when response is gotten
         """
-        pass
+        raise NotImplementedError
 
     def handle_rpc_request(self, message: ConsumedMessage):
         """

@@ -2,6 +2,7 @@ import time
 import random
 import unittest
 import threading
+import logging
 
 from rabbitmq_client.client import RMQClient
 from rabbitmq_client import rpc
@@ -273,6 +274,63 @@ class TestRPC(unittest.TestCase):
         Stops the client to release allocated resources at the end of each test.
         """
         self.client.stop()
+
+
+class TestShutdown(unittest.TestCase):
+    """Test that the client shuts down correctly and cleans up."""
+
+    def test_shutdown_correct_thread_count(self):
+        """Verifies the correct thread count after client stop."""
+        client = RMQClient()
+        client.start()
+
+        # At the time of writing, this starts the QueueFeederThread for the
+        # Consumer _work_queue, ensuring a correct thread count reading.
+        client.enable_rpc_server(RPC_SERVER_NAME, rpc_request_handler)
+        wait_until_rpc_ready(self, client, "server")
+
+        ###################################
+        # PRODUCER WORK THREAD FORCE START
+        ###################################
+        event = threading.Event()
+
+        def subscription_callback(message):
+            event.set()
+
+        client.subscribe(TEST_TOPIC_1, subscription_callback)
+        wait_until_subscribed(self, client, TEST_TOPIC_1)
+
+        client.publish(TEST_TOPIC_1, b'msg')
+        event.wait()  # Confirms publish happens.
+        ###################################
+
+        self.assertEqual(4, threading.active_count())
+
+        client.stop()
+
+        # Only main thread still lives, monitoring thread waited for.
+        self.assertEqual(1, threading.active_count())
+
+    def test_shutdown_correct_thread_count_w_logging(self):
+        """
+        Verifies the correct thread count after client with logging enabled is
+        stopped.
+        """
+        client = RMQClient(log_level=logging.DEBUG)
+        client.start()
+
+        # At the time of writing, this starts the QueueFeederThread for the
+        # Consumer _work_queue, ensuring a correct thread count reading.
+        client.enable_rpc_server(RPC_SERVER_NAME, rpc_request_handler)
+        wait_until_rpc_ready(self, client, "server")
+
+        # Additional threads for logging queue listener and the
+        # QueueFeederThread of the logging queue.
+        self.assertEqual(5, threading.active_count())
+
+        client.stop()
+
+        self.assertEqual(1, threading.active_count())
 
 
 if __name__ == '__main__':
