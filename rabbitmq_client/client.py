@@ -17,10 +17,13 @@ class RMQClient:
     wanting to either publish, subscribe, or issue RPC requests.
     """
 
-    def __init__(self, log_level=None):
+    def __init__(self,
+                 log_level=None,
+                 connection_parameters=None):
         """
         :param log_level: sets the log level of the RMQClient, None being no
                           logging at all.
+        :param connection_parameters: pika.ConnectionParameters
         """
         log.initialize_log_manager(log_level=log_level)
 
@@ -28,8 +31,8 @@ class RMQClient:
         # Client process log handler is set here!
         log.set_process_log_handler(log_manager.log_queue, log_level)
 
-        self._consumer = RMQConsumer()
-        self._producer = RMQProducer()
+        self._consumer = RMQConsumer(connection_parameters)
+        self._producer = RMQProducer(connection_parameters)
 
         self._rpc_handler = RMQRPCHandler(self._consumer,
                                           self._producer)
@@ -90,9 +93,9 @@ class RMQClient:
 
     def publish(self, topic, message):
         """
-        Publishes a message on the given topic. The publising work is dispatched
-        to another process, meaning publishing probably has not completed by the
-        time this function returns.
+        Publishes a message on the given topic. The publising work is
+        dispatched to another process, meaning publishing probably has not
+        completed by the time this function returns.
 
         :param str topic: topic to publish on
         :param bytes message: message to publish

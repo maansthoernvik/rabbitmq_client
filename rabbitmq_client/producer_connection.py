@@ -2,7 +2,6 @@ import signal
 import logging
 
 from threading import Thread
-from multiprocessing import Queue as IPCQueue
 
 from .producer_channel import RMQProducerChannel
 from .connection import RMQConnection
@@ -12,13 +11,17 @@ from rabbitmq_client import log
 LOGGER = logging.getLogger(__name__)
 
 
-def create_producer_connection(work_queue, log_queue, log_level):
+def create_producer_connection(connection_parameters,
+                               work_queue,
+                               log_queue,
+                               log_level):
     """
     Interface function to instantiate and connect a producer connection. This
     function is intended as a target for a new process to avoid having to
     instantiate the RMQProducerConnection outside of the new process' memory
     context.
 
+    :param connection_parameters: pika.ConnectionParameters or None
     :param work_queue: process shared queue used to issue work for the
                        producer connection
     :param log_queue: queue to post log writes to
@@ -27,23 +30,29 @@ def create_producer_connection(work_queue, log_queue, log_level):
     # Configure logging
     log.set_process_log_handler(log_queue, log_level)
 
-    producer_connection = RMQProducerConnection(work_queue)
+    producer_connection = RMQProducerConnection(connection_parameters,
+                                                work_queue)
     producer_connection.connect()
 
 
 class RMQProducerConnection(RMQConnection):
     """
-    This class handles a connection to a RabbitMQ server intended for a producer
-    entity. Messages to be published are posted to a process shared queue which
+    This class handles a connection to a RabbitMQ server intended for a
+    producer entity.
+
+    Messages to be published are posted to a process shared queue which
     is read continuously by a connection process-local thread assigned to
     monitoring the queue.
     """
 
-    def __init__(self, work_queue):
+    def __init__(self,
+                 connection_parameters,
+                 work_queue):
         """
         Initializes the RMQProducerConnection's work queue and binds signal
         handlers. The work queue can be used to issue commands.
 
+        :param connection_parameters: pika.ConnectionParameters or None
         :param IPCQueue work_queue: process shared queue used to issue work for
                                     the consumer connection
         """
@@ -56,7 +65,7 @@ class RMQProducerConnection(RMQConnection):
         signal.signal(signal.SIGINT, self.interrupt)
         signal.signal(signal.SIGTERM, self.terminate)
 
-        super().__init__()
+        super().__init__(connection_parameters)
 
     def on_connection_open(self, connection):
         """

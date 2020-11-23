@@ -2,7 +2,6 @@ import signal
 import logging
 
 from threading import Thread
-from multiprocessing import Queue as IPCQueue
 
 from .consumer_channel import RMQConsumerChannel
 from .connection import RMQConnection
@@ -12,7 +11,8 @@ from rabbitmq_client import log
 LOGGER = logging.getLogger(__name__)
 
 
-def create_consumer_connection(work_queue,
+def create_consumer_connection(connection_parameters,
+                               work_queue,
                                consumed_messages,
                                log_queue,
                                log_level):
@@ -22,6 +22,7 @@ def create_consumer_connection(work_queue,
     instantiate the RMQConsumerConnection outside of the new process' memory
     context.
 
+    :param connection_parameters: pika.ConnectionParameters or None
     :param IPCQueue work_queue: process shared queue used to issue work for the
                                 consumer connection
     :param IPCQueue consumed_messages: process shared queue used to forward
@@ -33,21 +34,28 @@ def create_consumer_connection(work_queue,
     # Configure logging
     log.set_process_log_handler(log_queue, log_level)
 
-    consumer_connection = RMQConsumerConnection(work_queue, consumed_messages)
+    consumer_connection = RMQConsumerConnection(connection_parameters,
+                                                work_queue,
+                                                consumed_messages)
     consumer_connection.connect()
 
 
 class RMQConsumerConnection(RMQConnection):
     """
     Specific connection implementation for RMQ Consumers. This class ensures:
-    1. handling of channels according to what is needed for a RabbitMQ consumer.
-    2. listening on a process shared work queue where work can be posted towards
-       the RMQ consumer connection, for example to subscribe to a new topic.
+    1. handling of channels according to what is needed for a RabbitMQ
+       consumer.
+    2. listening on a process shared work queue where work can be posted
+       towards the RMQ consumer connection, for example to subscribe to a new
+       topic.
     3. posting consumed messages to a process shared queue so that incoming
        messages can be read and handled by the controlling process.
     """
 
-    def __init__(self, work_queue, consumed_messages):
+    def __init__(self,
+                 connection_parameters,
+                 work_queue,
+                 consumed_messages):
         """
         Initializes the RMQConsumerConnection with two queues and binds signal
         handlers. The two queues are used to communicate between the connection
@@ -55,6 +63,7 @@ class RMQConsumerConnection(RMQConnection):
         and the consumed messages queue is used to forward received messages to
         the controlling process.
 
+        :param connection_parameters: pika.ConnectionParameters or None
         :param work_queue: process shared queue used to issue work for the
                            consumer connection
         :param consumed_messages: process shared queue used to forward messages
@@ -71,7 +80,7 @@ class RMQConsumerConnection(RMQConnection):
         signal.signal(signal.SIGINT, self.interrupt)
         signal.signal(signal.SIGTERM, self.terminate)
 
-        super().__init__()
+        super().__init__(connection_parameters)
 
     def on_connection_open(self, connection):
         """
@@ -111,9 +120,9 @@ class RMQConsumerConnection(RMQConnection):
 
     def consumer_connection_started(self):
         """
-        Shall be called when the consumer connection has been established to the
-        point where it is ready to receive work from its controlling process.
-        In this case, when a channel has been established.
+        Shall be called when the consumer connection has been established to
+        the point where it is ready to receive work from its controlling
+        process. In this case, when a channel has been established.
         """
         LOGGER.info("consumer_connection_started")
 

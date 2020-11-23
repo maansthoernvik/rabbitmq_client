@@ -9,10 +9,10 @@ LOGGER = logging.getLogger(__name__)
 
 class RMQConnection(metaclass=ABCMeta):
     """
-    Abstract class implementing the basics of a RabbitMQ server connection. This
-    class does not meddle with channels as the handling of a channel may differ
-    between consumers and producers. The RMQConnection class therefore only
-    handles the connection (pika.SelectConnection) object itself.
+    Abstract class implementing the basics of a RabbitMQ server connection.
+    This class does not meddle with channels as the handling of a channel may
+    differ between consumers and producers. The RMQConnection class therefore
+    only handles the connection (pika.SelectConnection) object itself.
 
     Subclasses inheriting from RMQConnection have to override the
     on_connection_open(connection: SelectConnection) function to take over once
@@ -28,14 +28,23 @@ class RMQConnection(metaclass=ABCMeta):
 
     _closing: bool
 
-    def __init__(self):
+    def __init__(self,
+                 connection_parameters):
         """
         Initializes the RMQ connection with connection parameters and the
         general state of the RMQConnection adapter.
+        :param connection_parameters: pika.ConnectionParameters or None
         """
         LOGGER.debug("__init__ of connection")
 
-        self._connection_parameters = pika.ConnectionParameters()
+        if connection_parameters:
+            self._connection_parameters = connection_parameters
+        else:
+            # Default credentials: guest/guest
+            # Default host: localhost
+            # Default vhost: /
+            # Default port: 5672
+            self._connection_parameters = pika.ConnectionParameters()
 
         self._connection = pika.SelectConnection(
             parameters=self._connection_parameters,
@@ -58,9 +67,9 @@ class RMQConnection(metaclass=ABCMeta):
     @abstractmethod
     def on_connection_open(self, _connection):
         """
-        Callback upon opened connection. Subclasses shall override this function
-        in order to be notified when a connection has been established in order
-        for them to know when they are able to create channels.
+        Callback upon opened connection. Subclasses shall override this
+        function in order to be notified when a connection has been established
+        in order for them to know when they are able to create channels.
 
         :param pika.SelectConnection _connection: connection that was opened
         """
@@ -69,8 +78,8 @@ class RMQConnection(metaclass=ABCMeta):
     @abstractmethod
     def on_connection_closed(self, _connection, reason):
         """
-        Callback upon closed connection. Subclasses shall override this function
-        in order to be notified when a connection has been closed.
+        Callback upon closed connection. Subclasses shall override this
+        function in order to be notified when a connection has been closed.
 
         :param pika.SelectConnection _connection: connection that was closed
         :param Exception reason: reason for closing
@@ -93,7 +102,8 @@ class RMQConnection(metaclass=ABCMeta):
 
     def finalize_disconnect(self):
         """
-        Shall be called once the connection has been closed to stop the IO-Loop.
+        Shall be called once the connection has been closed to stop the
+        IO-Loop.
         """
         LOGGER.debug("finalizing disconnect")
 

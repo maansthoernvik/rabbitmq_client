@@ -65,20 +65,23 @@ class RMQConsumer:
     Pub/Sub
     =================
     Subscriptions can be added dynamically at any point, even before a
-    connection has been established to the RMQ-server. The operation will simply
-    be put on hold until exchanges/queues can be declared.
+    connection has been established to the RMQ-server. The operation will
+    simply be put on hold until exchanges/queues can be declared.
 
     =================
     RPC
     =================
     To support RPC, subscriptions are added with the internal flag, and the
     whole ConsumedMessage is forwarded to the RPCHandler. Other than that, the
-    RPC support works by subscribing just like any other subscription, only that
-    the recepient is the RPCHandler.
+    RPC support works by subscribing just like any other subscription, only
+    that the recepient is the RPCHandler.
     """
 
-    def __init__(self):
-        """"""
+    def __init__(self,
+                 connection_parameters):
+        """
+        :param connection_parameters: pika.ConnectionParameters or None
+        """
         LOGGER.debug("__init__")
 
         self._consumers = list()
@@ -92,6 +95,7 @@ class RMQConsumer:
         self._connection_process = Process(
             target=create_consumer_connection,
             args=(
+                connection_parameters,
                 self._work_queue,
                 self._consumed_messages,
 
@@ -107,8 +111,9 @@ class RMQConsumer:
         Starts the RMQConsumer, meaning it is prepared for consuming messages.
 
         By starting the RMQConsumer, a process is created which will hold an
-        RMQConsumerConnection. This function also starts a thread in the current
-        process that monitors the consumed_messages queue for incoming messages.
+        RMQConsumerConnection. This function also starts a thread in the
+        current process that monitors the consumed_messages queue for incoming
+        messages.
         """
         LOGGER.info("start")
 
@@ -132,7 +137,6 @@ class RMQConsumer:
                 self.flush_and_close_queues()
                 break
 
-
     def flush_and_close_queues(self):
         """
         Flushed process shared queues in an attempt to stop background threads.
@@ -151,11 +155,10 @@ class RMQConsumer:
         # thread stop.
         self._work_queue.join_thread()
 
-
     def handle_message(self, message: ConsumedMessage):
         """
-        Defines handling for a received message, dispatches the message contents
-        to registered callbacks depending on the topic.
+        Defines handling for a received message, dispatches the message
+        contents to registered callbacks depending on the topic.
 
         :param ConsumedMessage message: received message
         """

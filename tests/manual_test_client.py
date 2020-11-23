@@ -2,13 +2,14 @@ import logging
 import sys
 import os
 import signal
-import time
 import threading
+
+import pika
 
 # For testing, needed to import "../rabbitmq_client".
 sys.path.append(os.path.abspath(".."))
 
-from rabbitmq_client.client import RMQClient
+from rabbitmq_client.client import RMQClient  # noqa
 
 
 TEST_TOPIC_1 = "test1"
@@ -40,7 +41,14 @@ if __name__ == "__main__":
     print(f"Threads before test program start: {threading.active_count()}")
 
     print("instantiating RMQ client")
-    client = RMQClient(log_level=logging.DEBUG)
+    credentials = pika.PlainCredentials('guest', 'guest')
+    conn_params = pika.ConnectionParameters(host="localhost",
+                                            port=5672,
+                                            virtual_host='/',
+                                            credentials=credentials)
+
+    client = RMQClient(log_level=logging.DEBUG,
+                       connection_parameters=conn_params)
     print("starting RMQ client")
     client.start()
 
@@ -69,6 +77,17 @@ if __name__ == "__main__":
     print("Enabling RPC client")
     client.enable_rpc_client()
 
+    def print_help():
+        print("Possible inputs:")
+        print("pub-1: Publish to TEST_TOPIC_1")
+        print("pub-2: Publish to TEST_TOPIC_2")
+        print("rpc-exists: RPC message on created RPC server")
+        print("rpc-does-not-exist: to test timeouts")
+        print("list-threads: lists currently running threads")
+        print("stop: stops the client")
+        print("")
+    print_help()
+
     try:
         while True:
             inp = input()
@@ -88,7 +107,8 @@ if __name__ == "__main__":
 
             elif inp == "rpc-does-not-exist":
                 print("RPC call to: rpc_server_2")
-                reply = client.rpc_call("rpc_server_2", b"testing another RPC server")
+                reply = client.rpc_call("rpc_server_2",
+                                        b"testing another RPC server")
                 print("CLIENT got RPC reply: {}".format(reply))
 
             elif inp == "list-threads":
@@ -99,9 +119,9 @@ if __name__ == "__main__":
             elif inp == "stop":
                 print("Stopping client")
                 client.stop()
-
-            elif inp == "exit":
-                print("Stopping test program")
+                print(f"Threads after client stop: {threading.active_count()}")
+                for t in threading.enumerate():
+                    print(t)
                 break
 
     except Exception:

@@ -25,13 +25,16 @@ class RMQProducer:
     =================
     RPC
     =================
-    Acts more as an interface towards the producer connection for the RPCHandler
-    than actually doing something useful. Only instantiates work items and puts
-    them on the work queue.
+    Acts more as an interface towards the producer connection for the
+    RPCHandler than actually doing something useful. Only instantiates work
+    items and puts them on the work queue.
     """
 
-    def __init__(self):
-        """"""
+    def __init__(self,
+                 connection_parameters):
+        """
+        :param connection_parameters: pika.ConnectionParameters or None
+        """
         LOGGER.debug("__init__")
 
         self._work_queue = IPCQueue()
@@ -41,6 +44,7 @@ class RMQProducer:
         self._connection_process = Process(
             target=create_producer_connection,
             args=(
+                connection_parameters,
                 self._work_queue,
 
                 # This is fine since we're still in the same process!
@@ -54,8 +58,8 @@ class RMQProducer:
         Starts the producer's connection process in order to be able to publish
         messages. The connection process is maintained in another process, the
         work queue passed along to the new process is process shared to allow
-        for the controlling process to issue commands to the connection process,
-        for example to publish messages.
+        for the controlling process to issue commands to the connection
+        process, for example to publish messages.
         """
         LOGGER.info("start")
 
@@ -72,7 +76,6 @@ class RMQProducer:
         self._connection_process.terminate()
         self._connection_process.join(timeout=2)
 
-
     def flush_and_close_queues(self):
         """
         Flushed process shared queues in an attempt to stop background threads.
@@ -83,7 +86,6 @@ class RMQProducer:
         # In order for client.stop() to be reliable and consistent, ensure
         # thread stop.
         self._work_queue.join_thread()
-
 
     def publish(self, topic, message):
         """
