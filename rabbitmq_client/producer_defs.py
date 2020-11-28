@@ -1,4 +1,4 @@
-from .common_defs import Printable
+from rabbitmq_client.common_defs import Printable
 
 
 """

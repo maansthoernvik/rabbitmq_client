@@ -220,7 +220,8 @@ class TestSubscription(unittest.TestCase):
 
     def tearDown(self):
         """
-        Stops the client to release allocated resources at the end of each test.
+        Stops the client to release allocated resources at the end of each
+        test.
         """
         self.client.stop()
 
@@ -271,7 +272,8 @@ class TestRPC(unittest.TestCase):
 
     def tearDown(self):
         """
-        Stops the client to release allocated resources at the end of each test.
+        Stops the client to release allocated resources at the end of each
+        test.
         """
         self.client.stop()
 
@@ -294,21 +296,28 @@ class TestShutdown(unittest.TestCase):
         ###################################
         event = threading.Event()
 
+        publish_received = False
+
         def subscription_callback(message):
+            nonlocal publish_received
+            publish_received = True
             event.set()
 
         client.subscribe(TEST_TOPIC_1, subscription_callback)
         wait_until_subscribed(self, client, TEST_TOPIC_1)
 
         client.publish(TEST_TOPIC_1, b'msg')
-        event.wait()  # Confirms publish happens.
+
+        event.wait(timeout=2)  # Confirms publish happens.
+        self.assertEqual(True, publish_received)
         ###################################
 
         self.assertEqual(4, threading.active_count())
 
         client.stop()
 
-        # Only main thread still lives, monitoring thread waited for.
+        # Only main thread still lives, all other threads have been waited for,
+        # ensuring synchronous termination.
         self.assertEqual(1, threading.active_count())
 
     def test_shutdown_correct_thread_count_w_logging(self):

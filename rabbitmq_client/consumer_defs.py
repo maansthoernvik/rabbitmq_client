@@ -1,4 +1,4 @@
-from .common_defs import Printable
+from rabbitmq_client.common_defs import Printable
 
 
 """
@@ -34,12 +34,14 @@ class Consumer(Printable):
 
 class Subscription(Consumer):
     """
-    A subscription work item. Queue name will be set after queue declaration.
-    Subscriptions uses the fanout exchange type, and a queue is generated with
-    a random name to receive exchange-bound messages on. This consume work item
-    will receive a set queue name after its queue has been declared, so it is
-    possible to find out the queue name when receiving the ConsumeOk from the
-    consumer connection.
+    A Subscription work item.
+
+    Queue name will be set after queue declaration. Subscriptions uses the
+    fanout exchange type, and a queue is generated with a random name to
+    receive exchange-bound messages on. This consume work item will receive a
+    set queue name after its queue has been declared, so it is possible to find
+    out the queue name when receiving the ConsumeOk from the consumer
+    connection.
     """
 
     def __init__(self, topic):
@@ -51,7 +53,7 @@ class Subscription(Consumer):
 
 class RPCServer(Consumer):
     """
-    An RPCServer work item.
+    An RPC Server work item.
     """
 
     def __init__(self, queue_name):
@@ -63,12 +65,25 @@ class RPCServer(Consumer):
 
 class RPCClient(Consumer):
     """
-    An RPCClient work item.
+    An RPC Client work item.
     """
 
     def __init__(self, queue_name):
         """
         :param queue_name: name of response queue to declare
+        """
+        self.queue_name = queue_name
+
+
+class CommandQueue(Consumer):
+    """
+    A Command Queue work item.
+    """
+
+    def __init__(self, queue_name):
+        """
+        :param queue_name: name for the command queue
+        :type queue_name: str
         """
         self.queue_name = queue_name
 
