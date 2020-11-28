@@ -2,7 +2,8 @@ import functools
 import logging
 
 from .consumer_defs import Subscription, RPCServer, RPCClient, \
-                           ConsumedMessage, ConsumeOk, AUTO_GEN_QUEUE_NAME
+                           ConsumedMessage, ConsumeOk, CommandQueue, \
+                           AUTO_GEN_QUEUE_NAME
 from .common_defs import EXCHANGE_TYPE_FANOUT
 
 
@@ -67,8 +68,7 @@ class RMQConsumerChannel:
         :param _channel: closed channel
         :param reason: reason channel was closed (exception)
         """
-        LOGGER.info("on_channel_closed channel: {} reason: {}"
-                              .format(_channel, reason))
+        LOGGER.info(f"on_channel_closed channel: {_channel} reason: {reason}")
 
         self._open = False
 
@@ -79,7 +79,7 @@ class RMQConsumerChannel:
         :param consume: consumer information needed to establish the new
                         consumer
         """
-        LOGGER.debug("handle_consume consume: {}".format(consume))
+        LOGGER.debug(f"handle_consume consume: {consume}")
 
         if isinstance(consume, Subscription):
             cb = functools.partial(self.on_exchange_declared,
@@ -92,6 +92,7 @@ class RMQConsumerChannel:
             cb = functools.partial(self.on_queue_declared,
                                    consume=consume)
             self._channel.queue_declare(queue=consume.queue_name,
+                                        durable=True,  # Survive broker reboot
                                         callback=cb)
 
         elif isinstance(consume, RPCClient):
@@ -99,6 +100,13 @@ class RMQConsumerChannel:
                                    consume=consume)
             self._channel.queue_declare(queue=consume.queue_name,
                                         exclusive=True,
+                                        callback=cb)
+
+        elif isinstance(consume, CommandQueue):
+            cb = functools.partial(self.on_queue_declared,
+                                   consume=consume)
+            self._channel.queue_declare(queue=consume.queue_name,
+                                        durable=True,  # Survive broker reboot
                                         callback=cb)
 
     def on_exchange_declared(self, _frame, consume):
@@ -126,8 +134,7 @@ class RMQConsumerChannel:
         :param consume: consumer information needed to establish the new
                         consumer
         """
-        LOGGER.debug("on_queue_declared frame: {} consume: {}"
-                     .format(frame, consume))
+        LOGGER.debug(f"on_queue_declared frame: {frame} consume: {consume}")
 
         if isinstance(consume, Subscription):
             consume.set_queue_name(frame.method.queue)
@@ -138,8 +145,10 @@ class RMQConsumerChannel:
             )
 
         elif isinstance(consume, RPCServer) or \
-                isinstance(consume, RPCClient):
-            # No exchange = no need to bind the queue
+                isinstance(consume, RPCClient) or \
+                isinstance(consume, CommandQueue):
+            # No exchange = no need to bind the queue, can go ahead and consume
+            # immediately.
             self.consume(consume)
 
     def on_queue_bound(self, _frame, consume):
@@ -166,7 +175,8 @@ class RMQConsumerChannel:
 
         cb = functools.partial(self.on_consume_ok,
                                consume=consume)
-        # All consumes so far are exclusive.
+        # All consumes so far are exclusive, meaning there can be only one
+        # consumer for the given queue.
         self._channel.basic_consume(consume.queue_name,
                                     self.on_message,
                                     exclusive=True,
@@ -181,8 +191,8 @@ class RMQConsumerChannel:
         :param pika.spec.BasicProperties properties: properties of the message
         :param bytes body: message body
         """
-        LOGGER.info("on_message method: {} properties: {} body: {}"
-                              .format(basic_deliver, properties, body))
+        LOGGER.info(f"on_message method: {basic_deliver} properties: \
+                    {properties} body: {body}")
 
         self._consumed_messages.put(
             ConsumedMessage(body,
