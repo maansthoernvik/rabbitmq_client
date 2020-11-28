@@ -13,8 +13,8 @@ LOGGER = logging.getLogger(__name__)
 
 class RMQClient:
     """
-    Handles connection to RabbitMQ and provides and interface for applications
-    wanting to either publish, subscribe, or issue RPC requests.
+    Provides an easy to use interface for applications wanting to leverage the
+    power of RabbitMQ and the awesome pika Python library.
     """
 
     def __init__(self,
@@ -58,7 +58,9 @@ class RMQClient:
 
         # Logging messages from consumer and producer are lost if logging is
         # not closed last.
-        log.get_log_manager().stop()
+        log_manager = log.get_log_manager()
+        if log_manager:
+            log_manager.stop()
 
     def subscribe(self, topic, callback):
         """

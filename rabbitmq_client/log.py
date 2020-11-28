@@ -51,7 +51,7 @@ def set_process_log_handler(queue, log_level):
     # case has enabled logging, the rabbitmq_client logger has an assigned
     # QueueHandler referring to an old IPC Queue.
 
-    # This also works as a way of clearning all handlers when a new process is
+    # This also works as a way of clearing all handlers when a new process is
     # forked.
     logger = logging.getLogger(TOP_LOGGER_NAME)
     logger.handlers = []
