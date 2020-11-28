@@ -12,6 +12,12 @@ sys.path.append(os.path.abspath(".."))
 from rabbitmq_client.client import RMQClient  # noqa
 
 
+"""
+MANUAL TESTING TOOL
+REMEMBER TO START FROM THE tests/ DIRECTORY!
+"""
+
+
 TEST_TOPIC_1 = "test1"
 TEST_TOPIC_2 = "test2"
 
