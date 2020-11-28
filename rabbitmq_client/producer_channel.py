@@ -5,8 +5,8 @@ from threading import Lock
 
 from pika.spec import Basic, BasicProperties
 
-from .common_defs import EXCHANGE_TYPE_FANOUT, DEFAULT_EXCHANGE
-from .producer_defs import Publish, RPCRequest, RPCResponse
+from .common_defs import EXCHANGE_TYPE_FANOUT
+from .producer_defs import Publish, RPCRequest, RPCResponse, DEFAULT_EXCHANGE
 
 
 LOGGER = logging.getLogger(__name__)
@@ -25,8 +25,8 @@ def max_attempts_reached(work):
 
 class RMQProducerChannel:
     """
-    Defines handling of a producer channel, enables confirm mode and keeps track
-    of delivery tags with each sent message.
+    Defines handling of a producer channel, enables confirm mode and keeps
+    track of delivery tags with each sent message.
     """
 
     def __init__(self):
@@ -186,7 +186,7 @@ class RMQProducerChannel:
         )
 
         LOGGER.debug("publish pending confirms: {}"
-                               .format(self._pending_confirm))
+                     .format(self._pending_confirm))
 
     def rpc_request(self, rpc_request: RPCRequest):
         """

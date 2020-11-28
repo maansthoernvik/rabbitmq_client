@@ -181,3 +181,30 @@ class RMQClient:
         :param callback: callback for when response is gotten
         """
         raise NotImplementedError
+
+    def command_queue(self, queue_name, callback):
+        """
+        Declare and consume from the named queue name. The declared queue will
+        have the following properties:
+
+        1. Durable
+        2. Exclusive consumer (only 1 consumer allowed)
+
+        Command queues are intended as a single point of communication towards
+        a given service, identified by its queue name. Commands sent shall be
+        handled in order, therefore there is queue durability and no more than
+        one consumer is allowed at any point in time.
+
+        NOTE! Ensure the consuming service is ready to receive requests before
+        declaring a command queue, as there already may be messages waiting
+        after a restart. If not, expect cyclic crashes.
+
+        :param queue_name: name of the command queue to be declared and
+                           consumed from
+        :type queue_name: str
+        :param callback: function to call on message reception
+        :type callback: callable
+        """
+        LOGGER.info(f"Command queue requested: {queue_name}")
+
+        self._consumer.command_queue(queue_name, callback)

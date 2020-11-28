@@ -7,7 +7,8 @@ from rabbitmq_client import log
 
 from .log import LogManager
 from .consumer_connection import create_consumer_connection
-from .consumer_defs import *
+from .consumer_defs import Printable, Subscription, ConsumedMessage, \
+                           ConsumeOk, StopConsumer, RPCServer, RPCClient
 
 
 LOGGER = logging.getLogger(__name__)
@@ -129,10 +130,13 @@ class RMQConsumer:
 
             message = self._consumed_messages.get()
 
+            # From Consumer connection
             if isinstance(message, ConsumedMessage):
                 self.handle_message(message)
             elif isinstance(message, ConsumeOk):
                 self.handle_consume_ok(message)
+
+            # For stopping the monitoring thread
             elif isinstance(message, StopConsumer):
                 self.flush_and_close_queues()
                 break
@@ -306,3 +310,13 @@ class RMQConsumer:
                                         internal=True,
                                         routing_key=queue_name))
         self._work_queue.put(RPCClient(queue_name))
+
+    def command_queue(self, queue_name, callback):
+        """
+        Adds a command queue instance to the list of consumers and issues a
+        request to the consumer connection to set up the command queue.
+        """
+        LOGGER.debug(f"command_queue {queue_name}")
+
+        self._consumers.append(Consumer(callback, routing_key=queue_name))
+        self._work_queue.put(CommandQueue(queue_name))

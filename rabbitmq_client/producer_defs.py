@@ -1,13 +1,24 @@
 from .common_defs import Printable
 
 
+"""
+Exchange properties
+"""
+
+
+DEFAULT_EXCHANGE = ""
+
+
+"""
+Produce work item types
+"""
+
+
 class GenProduce(Printable):
     """
     Base for producing work classes.
     """
     MAX_ATTEMPTS = 3
-
-    attempts: int
 
     def __init__(self):
         """"""
@@ -26,8 +37,6 @@ class Publish(GenProduce):
     """
     A Publish work item.
     """
-    topic: str
-    message: bytes
 
     def __init__(self, topic, message):
         """
@@ -43,10 +52,6 @@ class RPCRequest(GenProduce):
     """
     An RPC request work item.
     """
-    receiver: str
-    message: bytes
-    correlation_id: str
-    reply_to: str
 
     def __init__(self, receiver, message, correlation_id, reply_to):
         """
@@ -66,9 +71,6 @@ class RPCResponse(GenProduce):
     """
     An RPC response work item.
     """
-    receiver: str
-    message: bytes
-    correlation_id: str
 
     def __init__(self, receiver, message, correlation_id):
         """

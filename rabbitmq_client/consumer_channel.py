@@ -1,9 +1,9 @@
 import functools
 import logging
 
-from .consumer_defs import Subscription, RPCServer, RPCClient, ConsumedMessage, \
-    ConsumeOk
-from .common_defs import AUTO_GEN_QUEUE_NAME, EXCHANGE_TYPE_FANOUT
+from .consumer_defs import Subscription, RPCServer, RPCClient, \
+                           ConsumedMessage, ConsumeOk, AUTO_GEN_QUEUE_NAME
+from .common_defs import EXCHANGE_TYPE_FANOUT
 
 
 LOGGER = logging.getLogger(__name__)
@@ -110,7 +110,7 @@ class RMQConsumerChannel:
                         consumer
         """
         LOGGER.debug("on_exchange_declared frame: {} consume: {}"
-                               .format(_frame, consume))
+                     .format(_frame, consume))
 
         cb = functools.partial(self.on_queue_declared,
                                consume=consume)
@@ -127,7 +127,7 @@ class RMQConsumerChannel:
                         consumer
         """
         LOGGER.debug("on_queue_declared frame: {} consume: {}"
-                               .format(frame, consume))
+                     .format(frame, consume))
 
         if isinstance(consume, Subscription):
             consume.set_queue_name(frame.method.queue)
@@ -151,7 +151,7 @@ class RMQConsumerChannel:
                         consumer
         """
         LOGGER.debug("on_queue_bound frame: {} consume: {}"
-                               .format(_frame, consume))
+                     .format(_frame, consume))
 
         self.consume(consume)
 
@@ -162,7 +162,7 @@ class RMQConsumerChannel:
         :param consume: consume action
         """
         LOGGER.info("consume queue_name: {}"
-                              .format(consume.queue_name))
+                    .format(consume.queue_name))
 
         cb = functools.partial(self.on_consume_ok,
                                consume=consume)
