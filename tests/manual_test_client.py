@@ -30,7 +30,7 @@ def sub_callback(message):
 def rpc_request_callback(message):
     print("SERVER got RPC request: {}".format(message))
 
-    response = "default RPC server response"
+    response = b'default RPC server response'
 
     return response
 

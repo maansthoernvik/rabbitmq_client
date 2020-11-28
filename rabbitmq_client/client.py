@@ -2,10 +2,10 @@ import logging
 
 from rabbitmq_client import log
 
-from .log import LogManager
-from .rpc import RMQRPCHandler
-from .consumer import RMQConsumer
-from .producer import RMQProducer
+from rabbitmq_client.log import LogManager
+from rabbitmq_client.rpc import RMQRPCHandler
+from rabbitmq_client.consumer import RMQConsumer
+from rabbitmq_client.producer import RMQProducer
 
 
 LOGGER = logging.getLogger(__name__)
@@ -23,7 +23,8 @@ class RMQClient:
         """
         :param log_level: sets the log level of the RMQClient, None being no
                           logging at all.
-        :param connection_parameters: pika.ConnectionParameters
+        :param connection_parameters: connection parameters to the RMQ server
+        :type connection_parameters: pika.ConnectionParameters
         """
         log.initialize_log_manager(log_level=log_level)
 
@@ -89,7 +90,7 @@ class RMQClient:
         :param topic: topic to check
         :return: true if active
         """
-        LOGGER.debug(f"is_subscribed topic: {topic}")
+        LOGGER.info(f"is_subscribed topic: {topic}")
 
         return self._consumer.is_subscribed(topic)
 
@@ -102,7 +103,7 @@ class RMQClient:
         :param str topic: topic to publish on
         :param bytes message: message to publish
         """
-        LOGGER.info("publish to topic: {} message: {}".format(topic, message))
+        LOGGER.info(f"publish to topic: {topic} message: {message}")
         # publishes a message to the provided topic
         self._producer.publish(topic, message)
 
@@ -208,3 +209,16 @@ class RMQClient:
         LOGGER.info(f"Command queue requested: {queue_name}")
 
         self._consumer.command_queue(queue_name, callback)
+
+    def command(self, command_queue, command):
+        """
+        Send a command to a command queue.
+
+        :param command_queue: name of the command queue to send the command to
+        :type command_queue: str
+        :param command: command to send to command queue
+        :type command: bytes
+        """
+        LOGGER.info(f"command {command} to command queue: {command_queue}")
+
+        self._producer.command(command_queue, command)

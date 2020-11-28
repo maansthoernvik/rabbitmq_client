@@ -58,6 +58,11 @@ def wait_until_subscribed(test, client, topic, timeout=2.0):
 # Subscriptions definitions end
 
 
+# COMMAND QUEUE DEFINITIONS
+COMMAND_QUEUE = "command_queue_name"
+# COMMAND QUEUE DEFINITIONS end
+
+
 class TestSubscription(unittest.TestCase):
     """
     Tests for the client interface for subscriptions.
@@ -288,6 +293,46 @@ class TestRPC(unittest.TestCase):
         response = self.client.rpc_call(RPC_SERVER_NAME, b'message')
 
         self.assertEqual(response, b'answer')
+
+    def tearDown(self):
+        """
+        Stops the client to release allocated resources at the end of each
+        test.
+        """
+        self.client.stop()
+
+
+class TestCommand(unittest.TestCase):
+    """Verify that Command queues and Commands work as intended."""
+
+    def setUp(self) -> None:
+        """
+        Initializes the client for each test case.
+        """
+        self.client = RMQClient()
+        self.client.start()
+
+    def test_command_queue_basic(self):
+        """
+        Verify that a command queue can be declared and that the callback
+        works.
+        """
+
+        event = threading.Event()
+        gotten_command = None
+
+        def command_callback(command):
+            event.set()
+
+            nonlocal gotten_command
+            gotten_command = command
+
+        self.client.command_queue(COMMAND_QUEUE, command_callback)
+        self.client.command(COMMAND_QUEUE, b'command')
+
+        event.wait(timeout=2)
+
+        self.assertEqual(gotten_command, b'command')
 
     def tearDown(self):
         """

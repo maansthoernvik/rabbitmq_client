@@ -163,9 +163,10 @@ class RMQConsumer:
         """
         LOGGER.debug("consume")
         while True:
-            LOGGER.debug("Waiting for consumed messages")
+            LOGGER.debug("waiting for consumed messages")
 
             message = self._consumed_messages.get()
+            LOGGER.debug("got new consumed message")
 
             # From Consumer connection
             if isinstance(message, ConsumedMessage):
@@ -208,8 +209,8 @@ class RMQConsumer:
 
         for consumer in self._consumers:
             if message.exchange == consumer.exchange and \
-                    message.routing_key == consumer.routing_key:
-                if consumer.preserve:  # Internal consumer, forward raw
+               message.routing_key == consumer.routing_key:
+                if consumer.preserve:  # Internal consumer, forward object
                     consumer.callback(message)
                 else:  # Only message content
                     consumer.callback(message.message)

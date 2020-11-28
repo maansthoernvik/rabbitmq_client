@@ -6,7 +6,7 @@ from rabbitmq_client import log
 
 from .log import LogManager
 from .producer_connection import create_producer_connection
-from .producer_defs import *
+from .producer_defs import Publish, RPCRequest, RPCResponse, Command
 
 
 LOGGER = logging.getLogger(__name__)
@@ -107,9 +107,8 @@ class RMQProducer:
         :param correlation_id: identifies the request
         :param reply_to: response queue name
         """
-        LOGGER.info("rpc_request receiver: {} message: {} "
-                    "correlation_id: {} reply_to: {}"
-                    .format(receiver, message, correlation_id, reply_to))
+        LOGGER.debug(f"rpc_request receiver: {receiver} message: {message} "
+                     f"correlation_id: {correlation_id} reply_to: {reply_to}")
 
         self._work_queue.put(RPCRequest(receiver,
                                         message,
@@ -124,10 +123,22 @@ class RMQProducer:
         :param message: contents to send
         :param correlation_id: identifies which request the response belongs to
         """
-        LOGGER.info("rpc_reply receiver: {} message: {} "
-                    "correlation_id: {}".format(receiver, message,
-                                                correlation_id))
+        LOGGER.debug(f"rpc_reply receiver: {receiver} message: {message} "
+                     f"correlation_id: {correlation_id}")
 
         self._work_queue.put(RPCResponse(receiver,
                                          message,
                                          correlation_id))
+
+    def command(self, command_queue, command):
+        """
+        Send command to specified command queue.
+
+        :param command_queue: name of the command queue to send the command to
+        :type command_queue: str
+        :param command: command to send to command queue
+        :type command: bytes
+        """
+        LOGGER.debug(f"command {command} to {command_queue}")
+
+        self._work_queue.put(Command(command_queue, command))

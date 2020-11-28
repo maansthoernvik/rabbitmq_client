@@ -191,8 +191,8 @@ class RMQConsumerChannel:
         :param pika.spec.BasicProperties properties: properties of the message
         :param bytes body: message body
         """
-        LOGGER.info(f"on_message method: {basic_deliver} properties: \
-                    {properties} body: {body}")
+        LOGGER.info(f"on_message method: {basic_deliver} properties: "
+                    f"{properties} body: {body}")
 
         self._consumed_messages.put(
             ConsumedMessage(body,

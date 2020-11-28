@@ -131,7 +131,8 @@ class RMQProducerConnection(RMQConnection):
 
             # Blocking, set block=false to not block
             work = self._work_queue.get()
-            self._channel.handle_work(work)
+            LOGGER.debug("got work to do")
+            self._channel.handle_produce(work)
 
     def interrupt(self, _signum, _frame):
         """

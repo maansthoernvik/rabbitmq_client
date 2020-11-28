@@ -82,3 +82,20 @@ class RPCResponse(GenProduce):
         self.message = message
         self.correlation_id = correlation_id
         super().__init__()
+
+
+class Command(GenProduce):
+    """
+    A Command work item.
+    """
+
+    def __init__(self, command_queue, command):
+        """
+        :param command_queue: name of the command queue to send the command to
+        :type command_queue: str
+        :param command: command to send to command queue
+        :type command: bytes
+        """
+        self.command_queue = command_queue
+        self.command = command
+        super().__init__()
