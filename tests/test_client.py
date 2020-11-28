@@ -4,6 +4,8 @@ import unittest
 import threading
 import logging
 
+from rabbitmq_client.errors import ConsumerAlreadyExists
+
 from rabbitmq_client.client import RMQClient
 from rabbitmq_client import rpc
 
@@ -217,6 +219,23 @@ class TestSubscription(unittest.TestCase):
         event.wait(timeout=1)
 
         self.assertEqual(gotten_messages, 1)
+
+    def test_subscribe_to_same_topic_twice(self):
+        """Verify that a topic cannot be subscribed to twice."""
+
+        def subscription_callback(message):
+            pass
+
+        self.client.subscribe(TEST_TOPIC_1, subscription_callback)
+        wait_until_subscribed(self, self.client, TEST_TOPIC_1)
+
+        try:
+            self.client.subscribe(TEST_TOPIC_1, subscription_callback)
+
+            self.fail("Two subscriptions to the same topic should not be \
+                      possible")
+        except ConsumerAlreadyExists:
+            pass  # the test case
 
     def tearDown(self):
         """
