@@ -4,6 +4,8 @@ import unittest
 import threading
 import logging
 
+from rabbitmq_client.errors import ConsumerAlreadyExists
+
 from rabbitmq_client.client import RMQClient
 from rabbitmq_client import rpc
 
@@ -54,6 +56,11 @@ def wait_until_subscribed(test, client, topic, timeout=2.0):
         time.sleep(0.1)
         time_waited += 0.1
 # Subscriptions definitions end
+
+
+# COMMAND QUEUE DEFINITIONS
+COMMAND_QUEUE = "command_queue_name"
+# COMMAND QUEUE DEFINITIONS end
 
 
 class TestSubscription(unittest.TestCase):
@@ -218,9 +225,27 @@ class TestSubscription(unittest.TestCase):
 
         self.assertEqual(gotten_messages, 1)
 
+    def test_subscribe_to_same_topic_twice(self):
+        """Verify that a topic cannot be subscribed to twice."""
+
+        def subscription_callback(message):
+            pass
+
+        self.client.subscribe(TEST_TOPIC_1, subscription_callback)
+        wait_until_subscribed(self, self.client, TEST_TOPIC_1)
+
+        try:
+            self.client.subscribe(TEST_TOPIC_1, subscription_callback)
+
+            self.fail("Two subscriptions to the same topic should not be \
+                      possible")
+        except ConsumerAlreadyExists:
+            pass  # the test case
+
     def tearDown(self):
         """
-        Stops the client to release allocated resources at the end of each test.
+        Stops the client to release allocated resources at the end of each
+        test.
         """
         self.client.stop()
 
@@ -271,7 +296,48 @@ class TestRPC(unittest.TestCase):
 
     def tearDown(self):
         """
-        Stops the client to release allocated resources at the end of each test.
+        Stops the client to release allocated resources at the end of each
+        test.
+        """
+        self.client.stop()
+
+
+class TestCommand(unittest.TestCase):
+    """Verify that Command queues and Commands work as intended."""
+
+    def setUp(self) -> None:
+        """
+        Initializes the client for each test case.
+        """
+        self.client = RMQClient()
+        self.client.start()
+
+    def test_command_queue_basic(self):
+        """
+        Verify that a command queue can be declared and that the callback
+        works.
+        """
+
+        event = threading.Event()
+        gotten_command = None
+
+        def command_callback(command):
+            event.set()
+
+            nonlocal gotten_command
+            gotten_command = command
+
+        self.client.command_queue(COMMAND_QUEUE, command_callback)
+        self.client.command(COMMAND_QUEUE, b'command')
+
+        event.wait(timeout=2)
+
+        self.assertEqual(gotten_command, b'command')
+
+    def tearDown(self):
+        """
+        Stops the client to release allocated resources at the end of each
+        test.
         """
         self.client.stop()
 
@@ -294,21 +360,28 @@ class TestShutdown(unittest.TestCase):
         ###################################
         event = threading.Event()
 
+        publish_received = False
+
         def subscription_callback(message):
+            nonlocal publish_received
+            publish_received = True
             event.set()
 
         client.subscribe(TEST_TOPIC_1, subscription_callback)
         wait_until_subscribed(self, client, TEST_TOPIC_1)
 
         client.publish(TEST_TOPIC_1, b'msg')
-        event.wait()  # Confirms publish happens.
+
+        event.wait(timeout=2)  # Confirms publish happens.
+        self.assertEqual(True, publish_received)
         ###################################
 
         self.assertEqual(4, threading.active_count())
 
         client.stop()
 
-        # Only main thread still lives, monitoring thread waited for.
+        # Only main thread still lives, all other threads have been waited for,
+        # ensuring synchronous termination.
         self.assertEqual(1, threading.active_count())
 
     def test_shutdown_correct_thread_count_w_logging(self):

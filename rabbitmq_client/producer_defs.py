@@ -1,4 +1,17 @@
-from .common_defs import Printable
+from rabbitmq_client.common_defs import Printable
+
+
+"""
+Exchange properties
+"""
+
+
+DEFAULT_EXCHANGE = ""
+
+
+"""
+Produce work item types
+"""
 
 
 class GenProduce(Printable):
@@ -6,8 +19,6 @@ class GenProduce(Printable):
     Base for producing work classes.
     """
     MAX_ATTEMPTS = 3
-
-    attempts: int
 
     def __init__(self):
         """"""
@@ -26,8 +37,6 @@ class Publish(GenProduce):
     """
     A Publish work item.
     """
-    topic: str
-    message: bytes
 
     def __init__(self, topic, message):
         """
@@ -43,10 +52,6 @@ class RPCRequest(GenProduce):
     """
     An RPC request work item.
     """
-    receiver: str
-    message: bytes
-    correlation_id: str
-    reply_to: str
 
     def __init__(self, receiver, message, correlation_id, reply_to):
         """
@@ -66,9 +71,6 @@ class RPCResponse(GenProduce):
     """
     An RPC response work item.
     """
-    receiver: str
-    message: bytes
-    correlation_id: str
 
     def __init__(self, receiver, message, correlation_id):
         """
@@ -79,4 +81,21 @@ class RPCResponse(GenProduce):
         self.receiver = receiver
         self.message = message
         self.correlation_id = correlation_id
+        super().__init__()
+
+
+class Command(GenProduce):
+    """
+    A Command work item.
+    """
+
+    def __init__(self, command_queue, command):
+        """
+        :param command_queue: name of the command queue to send the command to
+        :type command_queue: str
+        :param command: command to send to command queue
+        :type command: bytes
+        """
+        self.command_queue = command_queue
+        self.command = command
         super().__init__()

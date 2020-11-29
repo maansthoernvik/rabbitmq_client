@@ -4,10 +4,15 @@ from multiprocessing import Queue as IPCQueue, Process
 from threading import Thread
 
 from rabbitmq_client import log
+from rabbitmq_client.log import LogManager
 
-from .log import LogManager
-from .consumer_connection import create_consumer_connection
-from .consumer_defs import *
+from rabbitmq_client.errors import ConsumerAlreadyExists
+
+from rabbitmq_client.consumer_connection import create_consumer_connection
+from rabbitmq_client.common_defs import Printable
+from rabbitmq_client.consumer_defs import \
+    Subscription, ConsumedMessage, ConsumeOk, StopConsumer, RPCServer, \
+    RPCClient, CommandQueue
 
 
 LOGGER = logging.getLogger(__name__)
@@ -18,20 +23,20 @@ class Consumer(Printable):
     Used to package what makes up a consumer to the RMQConsumer class. This
     class is instantiated when a new subscription is made.
 
-    The internal flag is used to subscribe internally in the RMQ client, where
+    The preserve flag is used to subscribe internally in the RMQ client, where
     the raw message format (ConsumedMessage) is used instead of extracting only
     the delivered message.
     """
-    callback: callable
-    internal: bool  # Indicates that raw message shall be forwarded to consumer
-    exchange: str
-    routing_key: str
-    consumer_tag: str
 
-    def __init__(self, callback, internal=False, exchange="", routing_key=""):
+    def __init__(self,
+                 callback,
+                 preserve=False,
+                 exchange="",
+                 routing_key="",
+                 consumer_tag=""):
         """
         :param callback: callback to call on new message
-        :param internal: set if you want to preserve original message format:
+        :param preserve: set if you want to preserve original message format:
                          ConsumedMessage instead of only getting bytes.
         :param exchange: subscribed exchange
         :param routing_key: subscribed routing key (queue name in case of
@@ -40,9 +45,10 @@ class Consumer(Printable):
         LOGGER.debug("__init__ Consumer")
 
         self.callback = callback
-        self.internal = internal
+        self.preserve = preserve
         self.exchange = exchange
         self.routing_key = routing_key
+        self.consumer_tag = consumer_tag
 
     def set_consumer_tag(self, new_consumer_tag):
         """
@@ -71,7 +77,7 @@ class RMQConsumer:
     =================
     RPC
     =================
-    To support RPC, subscriptions are added with the internal flag, and the
+    To support RPC, subscriptions are added with the preserve flag, and the
     whole ConsumedMessage is forwarded to the RPCHandler. Other than that, the
     RPC support works by subscribing just like any other subscription, only
     that the recepient is the RPCHandler.
@@ -120,19 +126,55 @@ class RMQConsumer:
         self._connection_process.start()
         self._monitoring_thread.start()
 
+    def stop(self):
+        """
+        Stops the RMQConsumer, tearing down the RMQConsumerConnection process.
+        """
+        LOGGER.info("stop")
+
+        self._consumed_messages.put(StopConsumer())
+        self._monitoring_thread.join()
+
+        self._connection_process.terminate()
+        self._connection_process.join(timeout=2)
+
+    def add_new_consumer(self, new_consumer: Consumer):
+        """
+        Adds a new Consumer instance to the RMQConsumer's list of consumers, as
+        long as the new consumer is not clashing with an old one.
+
+        :param new_consumer: new consumer instance to add
+        :raises ConsumerAlreadyExists: raised if the supplied consumer clashes
+                                       with an existing one
+        """
+        matching_consumers = \
+            [consumer for consumer in self._consumers
+             if consumer.exchange == new_consumer.exchange and
+             consumer.routing_key == new_consumer.routing_key]
+
+        if matching_consumers:
+            raise ConsumerAlreadyExists("A matching consumer already exists")
+
+        self._consumers.append(new_consumer)
+
     def consume(self):
         """
         Monitors the consumed_messages queue for any incoming messages.
         """
+        LOGGER.debug("consume")
         while True:
-            LOGGER.debug("consume waiting for new messages")
+            LOGGER.debug("waiting for consumed messages")
 
             message = self._consumed_messages.get()
+            LOGGER.debug("got new consumed message")
 
+            # From Consumer connection
             if isinstance(message, ConsumedMessage):
                 self.handle_message(message)
             elif isinstance(message, ConsumeOk):
                 self.handle_consume_ok(message)
+
+            # For stopping the monitoring thread
             elif isinstance(message, StopConsumer):
                 self.flush_and_close_queues()
                 break
@@ -141,6 +183,7 @@ class RMQConsumer:
         """
         Flushed process shared queues in an attempt to stop background threads.
         """
+        LOGGER.debug("flush_and_close_queues")
         while not self._consumed_messages.empty():
             self._consumed_messages.get()
         self._consumed_messages.close()
@@ -162,12 +205,12 @@ class RMQConsumer:
 
         :param ConsumedMessage message: received message
         """
-        LOGGER.info("handle_message message: {}".format(message))
+        LOGGER.debug("handle_message message: {}".format(message))
 
         for consumer in self._consumers:
             if message.exchange == consumer.exchange and \
-                    message.routing_key == consumer.routing_key:
-                if consumer.internal:  # Internal consumer, forward raw
+               message.routing_key == consumer.routing_key:
+                if consumer.preserve:  # Internal consumer, forward object
                     consumer.callback(message)
                 else:  # Only message content
                     consumer.callback(message.message)
@@ -179,7 +222,7 @@ class RMQConsumer:
 
         :param message: contains information about the started consumer
         """
-        LOGGER.info("handle_consume_ok message: {}".format(message))
+        LOGGER.info(f"handle_consume_ok for: {message.consume.queue_name}")
 
         if isinstance(message.consume, Subscription):
             # filter out subscription consumer and set consumer_tag
@@ -197,18 +240,6 @@ class RMQConsumer:
 
         LOGGER.debug("handle_consume_ok new consumer state: {}"
                      .format(consumer_state))
-
-    def stop(self):
-        """
-        Stops the RMQConsumer, tearing down the RMQConsumerConnection process.
-        """
-        LOGGER.info("stop")
-
-        self._consumed_messages.put(StopConsumer())
-        self._monitoring_thread.join()
-
-        self._connection_process.terminate()
-        self._connection_process.join(timeout=2)
 
     def subscribe(self, topic, callback):
         """
@@ -228,7 +259,7 @@ class RMQConsumer:
         #    connection
         LOGGER.debug("subscribe")
 
-        self._consumers.append(Consumer(callback, exchange=topic))
+        self.add_new_consumer(Consumer(callback, exchange=topic))
         self._work_queue.put(Subscription(topic))
 
     def is_subscribed(self, topic):
@@ -242,9 +273,9 @@ class RMQConsumer:
         result = False
 
         for consumer in self._consumers:
-            if not consumer.internal:
+            if not consumer.preserve:  # RPC
                 if consumer.exchange == topic and \
-                   hasattr(consumer, 'consumer_tag'):
+                   consumer.consumer_tag:  # If not "", ConsumeOK gotten
                     result = True
                     break
 
@@ -257,7 +288,7 @@ class RMQConsumer:
         Starts an RPC server by issuing a subscribe request to the consumer
         connection.
 
-        The internal flag ensures that the raw ConsumedMessage object is
+        The preserve flag ensures that the raw ConsumedMessage object is
         forwarded to the supplied callback function.
 
         :param queue_name: RPC server request queue name
@@ -265,10 +296,28 @@ class RMQConsumer:
         """
         LOGGER.debug("rpc_server")
 
-        self._consumers.append(Consumer(callback,
-                                        internal=True,
-                                        routing_key=queue_name))
+        self.add_new_consumer(Consumer(callback,
+                                       preserve=True,
+                                       routing_key=queue_name))
         self._work_queue.put(RPCServer(queue_name))
+
+    def rpc_client(self, queue_name, callback):
+        """
+        Starts an RPC client by issuing a subscribe request to the consumer
+        connection.
+
+        The preserve flag ensures that the raw ConsumedMessage object is
+        forwarded to the supplied callback function.
+
+        :param queue_name: RPC client response queue name
+        :param callback: callback on message received
+        """
+        LOGGER.debug("rpc_client")
+
+        self.add_new_consumer(Consumer(callback,
+                                       preserve=True,
+                                       routing_key=queue_name))
+        self._work_queue.put(RPCClient(queue_name))
 
     def is_rpc_consumer_ready(self, server_name) -> bool:
         """
@@ -279,30 +328,22 @@ class RMQConsumer:
         result = False
 
         for consumer in self._consumers:
-            if consumer.internal:
+            if consumer.preserve:
                 if consumer.routing_key == server_name and \
-                   hasattr(consumer, 'consumer_tag'):
+                   consumer.consumer_tag:
                     result = True
                     break
 
-        LOGGER.debug("is_rpc_consumer_ready {}".format(result))
+        LOGGER.debug(f"is_rpc_consumer_ready {result}")
 
         return result
 
-    def rpc_client(self, queue_name, callback):
+    def command_queue(self, queue_name, callback):
         """
-        Starts an RPC client by issuing a subscribe request to the consumer
-        connection.
-
-        The internal flag ensures that the raw ConsumedMessage object is
-        forwarded to the supplied callback function.
-
-        :param queue_name: RPC client response queue name
-        :param callback: callback on message received
+        Adds a command queue instance to the list of consumers and issues a
+        request to the consumer connection to set up the command queue.
         """
-        LOGGER.debug("rpc_client")
+        LOGGER.debug(f"command_queue {queue_name}")
 
-        self._consumers.append(Consumer(callback,
-                                        internal=True,
-                                        routing_key=queue_name))
-        self._work_queue.put(RPCClient(queue_name))
+        self.add_new_consumer(Consumer(callback, routing_key=queue_name))
+        self._work_queue.put(CommandQueue(queue_name))

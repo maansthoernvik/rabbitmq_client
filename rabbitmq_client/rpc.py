@@ -195,8 +195,7 @@ class RMQRPCHandler:
 
         :param message: consumed RPC response
         """
-        LOGGER.debug("handle_rpc_response response: {}"
-                               .format(message))
+        LOGGER.debug(f"handle_rpc_response response: {message}")
 
         response: RPCResponse = \
             self._pending_requests.pop(message.correlation_id)

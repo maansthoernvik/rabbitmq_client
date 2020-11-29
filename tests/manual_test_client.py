@@ -3,6 +3,7 @@ import sys
 import os
 import signal
 import threading
+import time
 
 import pika
 
@@ -29,7 +30,7 @@ def sub_callback(message):
 def rpc_request_callback(message):
     print("SERVER got RPC request: {}".format(message))
 
-    response = "default RPC server response"
+    response = b'default RPC server response'
 
     return response
 
@@ -40,6 +41,10 @@ def rpc_request_callback_2(message):
     response = "RPC SERVER NUMBER TWO RESPONSE"
 
     return response
+
+
+def command_queue_callback(message):
+    print(f"command gotten: {message}")
 
 
 if __name__ == "__main__":
@@ -57,6 +62,7 @@ if __name__ == "__main__":
                        connection_parameters=conn_params)
     print("starting RMQ client")
     client.start()
+    time.sleep(2)
 
     print(f"Threads after client start: {threading.active_count()}")
 
@@ -83,12 +89,17 @@ if __name__ == "__main__":
     print("Enabling RPC client")
     client.enable_rpc_client()
 
+    print("Setting up a command queue")
+    client.command_queue("command_queue", command_queue_callback)
+
     def print_help():
-        print("Possible inputs:")
+        print("")
+        print("### Possible inputs ###")
         print("pub-1: Publish to TEST_TOPIC_1")
         print("pub-2: Publish to TEST_TOPIC_2")
         print("rpc-exists: RPC message on created RPC server")
         print("rpc-does-not-exist: to test timeouts")
+        print("command: to test sending a command to command_queue")
         print("list-threads: lists currently running threads")
         print("stop: stops the client")
         print("")
@@ -96,6 +107,8 @@ if __name__ == "__main__":
 
     try:
         while True:
+            print("#########################")
+            print("Awaiting input...")
             inp = input()
 
             if inp == "pub-1":
@@ -116,6 +129,10 @@ if __name__ == "__main__":
                 reply = client.rpc_call("rpc_server_2",
                                         b"testing another RPC server")
                 print("CLIENT got RPC reply: {}".format(reply))
+
+            elif inp == "command":
+                print("Command being sent to command_queue")
+                client.command("command_queue", "command message")
 
             elif inp == "list-threads":
                 print(f"Threads started: {threading.active_count()}")

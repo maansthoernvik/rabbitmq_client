@@ -5,8 +5,9 @@ from threading import Lock
 
 from pika.spec import Basic, BasicProperties
 
-from .common_defs import EXCHANGE_TYPE_FANOUT, DEFAULT_EXCHANGE
-from .producer_defs import Publish, RPCRequest, RPCResponse
+from rabbitmq_client.common_defs import EXCHANGE_TYPE_FANOUT
+from rabbitmq_client.producer_defs import Publish, RPCRequest, RPCResponse, \
+                                          Command, DEFAULT_EXCHANGE
 
 
 LOGGER = logging.getLogger(__name__)
@@ -25,8 +26,8 @@ def max_attempts_reached(work):
 
 class RMQProducerChannel:
     """
-    Defines handling of a producer channel, enables confirm mode and keeps track
-    of delivery tags with each sent message.
+    Defines handling of a producer channel, enables confirm mode and keeps
+    track of delivery tags with each sent message.
     """
 
     def __init__(self):
@@ -45,7 +46,8 @@ class RMQProducerChannel:
         Opens a channel for the parameter connection.
 
         :param connection: connection to open channel for
-        :param notify_callback: callback to notify once channel has been created
+        :param notify_callback: callback to notify once channel has been
+                                created
         """
         LOGGER.debug("open_channel")
 
@@ -60,7 +62,8 @@ class RMQProducerChannel:
         Callback for when a channel has been established on the connection.
 
         :param pika.channel.Channel channel: the opened channel
-        :param notify_callback: callback to notify once channel has been created
+        :param notify_callback: callback to notify once channel has been
+                                created
         """
         LOGGER.info("on_channel_open channel: {}".format(channel))
 
@@ -81,10 +84,10 @@ class RMQProducerChannel:
         Callback for when a channel has been closed.
 
         :param pika.channel.Channel channel: the channel that was closed
-        :param Exception reason: exception explaining why the channel was closed
+        :param Exception reason: exception explaining why the channel was
+                                 closed
         """
-        LOGGER.info("on_channel_closed channel: {} reason: {}"
-                              .format(channel, reason))
+        LOGGER.info(f"on_channel_closed channel: {channel} reason: {reason}")
 
         self._open = False
 
@@ -93,85 +96,88 @@ class RMQProducerChannel:
         Callback for when confirm mode has been activated.
 
         :param pika.frame.Method _frame: message frame
-        :param notify_callback: callback to notify once channel has been created
+        :param notify_callback: callback to notify once channel has been
+                                created
         """
-        LOGGER.debug("on_confirm_mode_activated frame: {}"
-                               .format(_frame))
+        LOGGER.debug(f"on_confirm_mode_activated frame: {_frame}")
 
         notify_callback()
 
-    def handle_work(self, work):
+    def handle_produce(self, produce):
         """
-        Handler function for work.
+        Handler function for produce work.
 
-        :param work: work to be done by the producer channel
+        :param produce: work to be done by the producer channel
+        :type produce: Publish | RPCRequest | RPCResponse | Command
         """
-        LOGGER.debug("handle_work work: {}".format(work))
+        LOGGER.debug("handle_produce work: {}".format(produce))
 
-        if max_attempts_reached(work):
-            LOGGER.critical("handle_rpc_response max attempts "
-                                      "reached for: {}".format(work))
+        if max_attempts_reached(produce):
+            LOGGER.critical(f"handle_rpc_response max attempts "
+                            f"reached for: {produce}, aborting produce")
             return
 
-        if isinstance(work, Publish):
-            self.handle_publish(work)
-        elif isinstance(work, RPCRequest):
-            self.handle_rpc_request(work)
-        elif isinstance(work, RPCResponse):
-            self.handle_rpc_response(work)
+        if isinstance(produce, Publish):
+            cb = functools.partial(self.on_exchange_declared,
+                                   produce=produce)
+            self._channel.exchange_declare(exchange=produce.topic,
+                                           exchange_type=EXCHANGE_TYPE_FANOUT,
+                                           callback=cb)
 
-    def handle_publish(self, publish: Publish):
-        """
-        Handler for publishing work.
+        elif isinstance(produce, RPCRequest):
+            cb = functools.partial(self.on_queue_declared,
+                                   produce=produce)
+            self._channel.queue_declare(queue=produce.receiver,
+                                        durable=True,  # Survive broker reboot
+                                        callback=cb)
 
-        :param Publish publish: information about a publish
-        """
-        LOGGER.debug("handle_publish")
+        elif isinstance(produce, RPCResponse):
+            # Since just got RPC request, send RPC response without checking
+            # for queue declaration. Besides, the RPC reply queue is exclusive.
+            self.rpc_response(produce)
 
-        cb = functools.partial(self.on_exchange_declared,
-                               publish=publish)
-        self._channel.exchange_declare(exchange=publish.topic,
-                                       exchange_type=EXCHANGE_TYPE_FANOUT,
-                                       callback=cb)
+        elif isinstance(produce, Command):
+            cb = functools.partial(self.on_queue_declared,
+                                   produce=produce)
+            self._channel.queue_declare(queue=produce.command_queue,
+                                        durable=True,  # Survive broker reboot
+                                        callback=cb)
 
-    def handle_rpc_request(self, rpc_request: RPCRequest):
-        """
-        Handler for RPC request work.
-
-        :param rpc_request: information about the RPC request
-        """
-        LOGGER.debug("handle_rpc_request")
-
-        self.rpc_request(rpc_request)
-
-    def handle_rpc_response(self, rpc_response: RPCResponse):
-        """
-        Handler for RPC response work.
-
-        :param rpc_response: information about the RPC response
-        """
-        LOGGER.debug("handle_rpc_response")
-
-        self.rpc_response(rpc_response)
-
-    def on_exchange_declared(self, _frame, publish: Publish):
+    def on_exchange_declared(self, _frame, produce):
         """
         Callback for when an exchange has been declared.
 
         :param pika.frame.Method _frame: message frame
-        :param str publish: additional parameter from functools.partial,
-                            used to carry the publish object
+        :param produce: additional parameter from functools.partial,
+                        used to carry the publish object
+        :type produce: Publish
         """
-        LOGGER.debug("on_exchange_declared frame: {}"
-                               .format(_frame))
+        LOGGER.debug(f"on_exchange_declared frame: {_frame}")
 
-        self.publish(publish)
+        self.publish(produce)
+
+    def on_queue_declared(self, frame, produce):
+        """
+        Callback for when a queue has been declared.
+
+        :param pika.frame.Method frame: message frame
+        :param produce: information about the ongoing produce
+        :type produce: RPCRequest | RPCResponse | Command
+        """
+        LOGGER.debug(f"on_queue_declared frame: {frame} produce: {produce}")
+
+        # RPC responses do not check for queue declaration, nor do publishes.
+        if isinstance(produce, RPCRequest):
+            self.rpc_request(produce)
+        elif isinstance(produce, Command):
+            self.command(produce)
 
     def publish(self, publish):
         """
         Perform a publish operation.
 
-        :param Publish publish: the publish operation to perform
+        :param publish: the publish operation to perform
+        :type publish: Publish
         """
         LOGGER.info("publish publish: {}".format(publish))
 
@@ -186,13 +192,14 @@ class RMQProducerChannel:
         )
 
         LOGGER.debug("publish pending confirms: {}"
-                               .format(self._pending_confirm))
+                     .format(self._pending_confirm))
 
-    def rpc_request(self, rpc_request: RPCRequest):
+    def rpc_request(self, rpc_request):
         """
         Send an RPC request.
 
         :param rpc_request: request to send
+        :type rpc_request: RPCRequest
         """
         LOGGER.info("rpc_request request: {}".format(rpc_request))
 
@@ -210,16 +217,16 @@ class RMQProducerChannel:
             body=rpc_request.message,
         )
 
-        LOGGER.debug("rpc_request pending confirms: {}"
-                               .format(self._pending_confirm))
+        LOGGER.debug(f"rpc_request pending confirms: {self._pending_confirm}")
 
-    def rpc_response(self, rpc_response: RPCResponse):
+    def rpc_response(self, rpc_response):
         """
         Send an RPC response.
 
         :param rpc_response: RPC response to send
+        :type rpc_response: RPCResponse
         """
-        LOGGER.info("rpc_response response: {}".format(rpc_response))
+        LOGGER.info(f"rpc_response response: {rpc_response}")
 
         self._pending_confirm.update(
             {self._delivery_tag(): rpc_response.attempt()}
@@ -234,8 +241,28 @@ class RMQProducerChannel:
             body=rpc_response.message,
         )
 
-        LOGGER.debug("rpc_response pending confirms: {}"
-                               .format(self._pending_confirm))
+        LOGGER.debug(f"rpc_response pending confirms: {self._pending_confirm}")
+
+    def command(self, command):
+        """
+        Send a Command.
+
+        :param command: command work item
+        :type command: Command
+        """
+        LOGGER.info(f"command: {command}")
+
+        self._pending_confirm.update(
+            {self._delivery_tag(): command.attempt()}
+        )
+
+        self._channel.basic_publish(
+            exchange=DEFAULT_EXCHANGE,
+            routing_key=command.command_queue,
+            body=command.command
+        )
+
+        LOGGER.debug(f"command pending confirms: {self._pending_confirm}")
 
     def _delivery_tag(self):
         """
@@ -243,15 +270,14 @@ class RMQProducerChannel:
 
         :return: new delivery tag
         """
-        LOGGER.info("_delivery_tag current tag: {}"
-                               .format(self._expected_delivery_tag))
+        LOGGER.info(f"_delivery_tag current tag: "
+                    f"{self._expected_delivery_tag}")
 
         self._delivery_tag_lock.acquire()
         self._expected_delivery_tag = self._expected_delivery_tag + 1
         delivery_tag = self._expected_delivery_tag
 
-        LOGGER.info("_delivery_tag new tag: {}"
-                              .format(self._expected_delivery_tag))
+        LOGGER.info(f"_delivery_tag new tag: {self._expected_delivery_tag}")
 
         self._delivery_tag_lock.release()
 
@@ -273,5 +299,5 @@ class RMQProducerChannel:
             LOGGER.error("on_delivery_confirmed delivery Nacked!")
             self.handle_work(confirm)
 
-        LOGGER.debug("on_delivery_confirmed pending confirms: {}"
-                               .format(self._pending_confirm))
+        LOGGER.debug(f"on_delivery_confirmed pending confirms: "
+                     f"{self._pending_confirm}")

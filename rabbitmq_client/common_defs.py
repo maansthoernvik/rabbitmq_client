@@ -1,8 +1,14 @@
-AUTO_GEN_QUEUE_NAME = ""
+"""
+Exchange properties
+"""
 
-DEFAULT_EXCHANGE = ""
 
 EXCHANGE_TYPE_FANOUT = "fanout"
+
+
+"""
+Generic class info
+"""
 
 
 class Printable:

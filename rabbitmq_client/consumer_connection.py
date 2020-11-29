@@ -144,6 +144,7 @@ class RMQConsumerConnection(RMQConnection):
 
             # Blocking, set block=false to not block
             consume = self._work_queue.get()
+            LOGGER.debug("got work to do")
             self._channel.handle_consume(consume)
 
     def interrupt(self, _signum, _frame):
