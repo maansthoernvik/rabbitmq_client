@@ -28,13 +28,14 @@ Queues consumed from by a single service, command queues gives a service a way o
 
 ## Logging
 
-`rabbitmq_client` uses python logging, to tap into the logging flow you need to provide a `Queue` object from the `multiprocessing` module when instantiating the client (the ´log_queue´ kwarg). A queue is used since the consumer and producer is run in separate processes, and to streamline handling of logging records, each log record from all processes is put on a single queue. The consumer and producer processes set up ´QueueHandler´s each with ´log_level´ set to ´logging.DEBUG´. This means that ALL log records will be put on the ´multiprocessing.Queue´.
+`rabbitmq_client` uses python logging, to tap into the logging flow you need to provide a `Queue` object from the `multiprocessing` module when instantiating the client (the `log_queue` kwarg). A queue is used since the consumer and producer is run in separate processes, and to streamline handling of logging records, each log record from all processes is put on a single queue. The consumer and producer processes set up `QueueHandler`s each with `log_level` set to `logging.DEBUG`. This means that ALL log records will be put on the `multiprocessing.Queue`.
 
-An application using the ´rabbitmq_client´ that wants to enable logging needs to do the following BEFORE instantiating the ´rabbitmq_client´:
+An application using the `rabbitmq_client` that wants to enable logging needs to do the following BEFORE instantiating the `rabbitmq_client`:
 
 ```
 # Configure the logger for the current process, log to a queue handler
 logger = logging.getLogger('rabbitmq_client')
+logger.setLevel(WANTED_LOGGING_LEVEL)
 
 queue = multiprocessing.Queue()
 queue_handler = logging.handlers.QueueHandler(queue)
