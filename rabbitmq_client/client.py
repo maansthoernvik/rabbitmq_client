@@ -1,8 +1,5 @@
 import logging
 
-from rabbitmq_client import log
-
-from rabbitmq_client.log import LogManager
 from rabbitmq_client.rpc import RMQRPCHandler
 from rabbitmq_client.consumer import RMQConsumer
 from rabbitmq_client.producer import RMQProducer
@@ -18,25 +15,25 @@ class RMQClient:
     """
 
     def __init__(self,
-                 log_level=None,
+                 log_queue=None,
                  connection_parameters=None):
         """
-        :param log_level: sets the log level of the RMQClient, None being no
-                          logging at all.
+        :param log_queue: queue to post logging messages to
+        :type log_queue: multiprocessing.Queue
         :param connection_parameters: connection parameters to the RMQ server
         :type connection_parameters: pika.ConnectionParameters
         """
-        log.initialize_log_manager(log_level=log_level)
+        self._consumer = RMQConsumer(
+            log_queue=log_queue,
+            connection_parameters=connection_parameters
+        )
+        self._producer = RMQProducer(
+            log_queue=log_queue,
+            connection_parameters=connection_parameters
+        )
 
-        log_manager: LogManager = log.get_log_manager()
-        # Client process log handler is set here!
-        log.set_process_log_handler(log_manager.log_queue, log_level)
-
-        self._consumer = RMQConsumer(connection_parameters)
-        self._producer = RMQProducer(connection_parameters)
-
-        self._rpc_handler = RMQRPCHandler(self._consumer,
-                                          self._producer)
+        # RPC lives in the current process, no log queue propagation necessary.
+        self._rpc_handler = RMQRPCHandler(self._consumer, self._producer)
 
     def start(self):
         """
@@ -56,12 +53,6 @@ class RMQClient:
 
         self._consumer.stop()
         self._producer.stop()
-
-        # Logging messages from consumer and producer are lost if logging is
-        # not closed last.
-        log_manager = log.get_log_manager()
-        if log_manager:
-            log_manager.stop()
 
     def subscribe(self, topic, callback):
         """

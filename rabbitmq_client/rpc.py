@@ -3,8 +3,9 @@ import logging
 
 from threading import Event
 
-from .common_defs import Printable
-from .consumer_defs import ConsumedMessage
+from rabbitmq_client.common_defs import Printable
+from rabbitmq_client.consumer_defs import ConsumedMessage
+from rabbitmq_client.errors import RPCClientNotReady
 
 
 LOGGER = logging.getLogger(__name__)
@@ -141,6 +142,10 @@ class RMQRPCHandler:
         :return bytes answer: response message from the RPC server
         """
         LOGGER.debug("rpc_call")
+
+        if not self.is_rpc_client_ready():
+            raise RPCClientNotReady("RPC client is not ready, have you called"
+                                    "enable_rpc_client()?")
 
         corr_id = str(uuid.uuid1())
 

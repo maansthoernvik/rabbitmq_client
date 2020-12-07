@@ -20,20 +20,17 @@ class RMQConnection(metaclass=ABCMeta):
     creating channels. Subclasses also need to override
     on_connection_closed(connection: SelectConnection, reason) since consumers
     and producers differ quite a bit in how they handle their connection and
-    channels in event of an error.
+    channels in the event of an error.
     """
 
-    _connection_parameters: pika.ConnectionParameters
-    _connection: pika.SelectConnection
-
-    _closing: bool
-
     def __init__(self,
-                 connection_parameters):
+                 connection_parameters=None):
         """
         Initializes the RMQ connection with connection parameters and the
         general state of the RMQConnection adapter.
-        :param connection_parameters: pika.ConnectionParameters or None
+
+        :param connection_parameters: connection parameters to the RMQ server
+        :type connection_parameters: pika.ConnectionParameters
         """
         LOGGER.debug("__init__ of connection")
 

@@ -2,9 +2,6 @@ import logging
 
 from multiprocessing import Queue as IPCQueue, Process
 
-from rabbitmq_client import log
-
-from .log import LogManager
 from .producer_connection import create_producer_connection
 from .producer_defs import Publish, RPCRequest, RPCResponse, Command
 
@@ -31,26 +28,27 @@ class RMQProducer:
     """
 
     def __init__(self,
-                 connection_parameters):
+                 log_queue=None,
+                 connection_parameters=None):
         """
-        :param connection_parameters: pika.ConnectionParameters or None
+        :param log_queue: queue to post logging messages to
+        :type log_queue: multiprocessing.Queue
+        :param connection_parameters: connection parameters to the RMQ server
+        :type connection_parameters: pika.ConnectionParameters
         """
         LOGGER.debug("__init__")
 
         self._work_queue = IPCQueue()
 
-        log_manager: LogManager = log.get_log_manager()
-
         self._connection_process = Process(
             target=create_producer_connection,
             args=(
-                connection_parameters,
                 self._work_queue,
-
-                # This is fine since we're still in the same process!
-                log_manager.log_queue,
-                log_manager.log_level
-            )
+            ),
+            kwargs={
+                'log_queue': log_queue,
+                'connection_parameters': connection_parameters
+            }
         )
 
     def start(self):
@@ -76,10 +74,16 @@ class RMQProducer:
         self._connection_process.terminate()
         self._connection_process.join(timeout=2)
 
+        if self._connection_process.exitcode is not None:
+            self._connection_process.close()  # Release resources
+        else:
+            LOGGER.warning("Producer process did not exit within time limit")
+
     def flush_and_close_queues(self):
         """
         Flushed process shared queues in an attempt to stop background threads.
         """
+        LOGGER.debug("flush_and_close_queues")
         while not self._work_queue.empty():
             self._work_queue.get()
         self._work_queue.close()

@@ -4,8 +4,13 @@ import os
 import signal
 import threading
 import time
+import argparse
 
 import pika
+
+from multiprocessing import Queue
+from logging import StreamHandler
+from logging.handlers import QueueHandler, QueueListener
 
 # For testing, needed to import "../rabbitmq_client".
 sys.path.append(os.path.abspath(".."))
@@ -47,7 +52,14 @@ def command_queue_callback(message):
     print(f"command gotten: {message}")
 
 
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Manual testing tool")
+    parser.add_argument('-l', '--logging', action='store_true')
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
+    args = parse_arguments()
 
     print(f"Threads before test program start: {threading.active_count()}")
 
@@ -58,23 +70,61 @@ if __name__ == "__main__":
                                             virtual_host='/',
                                             credentials=credentials)
 
-    client = RMQClient(log_level=logging.DEBUG,
+    if args.logging:
+        log_queue = Queue()
+
+        # Current process handler
+        logger = logging.getLogger("rabbitmq_client")
+        logger.setLevel(logging.DEBUG)
+        queue_handler = QueueHandler(log_queue)
+        queue_handler.setLevel(logging.DEBUG)
+        logger.addHandler(queue_handler)
+
+        # Final logging destination
+        stream_handler = StreamHandler()
+        stream_handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter(fmt="{asctime} {levelname:^8} "
+                                          "{name} {message}",
+                                      style="{",
+                                      datefmt="%d/%m/%Y %H:%M:%S")
+        stream_handler.setFormatter(formatter)
+        listener = QueueListener(
+            log_queue,
+            stream_handler,
+            respect_handler_level=True
+        )
+        listener.start()
+    else:
+        log_queue = None
+
+    client = RMQClient(log_queue=log_queue,
                        connection_parameters=conn_params)
     print("starting RMQ client")
     client.start()
-    time.sleep(2)
+    time.sleep(1)
 
     print(f"Threads after client start: {threading.active_count()}")
 
     def interrupt(frame, signal):
         print("Interrupting test program")
+        stop()
+        raise Exception("Stopping")
+
+    def stop():
+        print("Stopping test program")
         client.stop()
+
+        if args.logging:
+            print("Logging activated, stopping queue and listener")
+            listener.stop()
+            while not log_queue.empty():
+                log_queue.get()
+            log_queue.close()
+            log_queue.join_thread()
 
         print(f"Threads after client stop: {threading.active_count()}")
         for t in threading.enumerate():
             print(t)
-
-        raise Exception("Stopping")
 
     print("Registering INTERRUPT handler")
     signal.signal(signal.SIGINT, interrupt)
@@ -141,10 +191,7 @@ if __name__ == "__main__":
 
             elif inp == "stop":
                 print("Stopping client")
-                client.stop()
-                print(f"Threads after client stop: {threading.active_count()}")
-                for t in threading.enumerate():
-                    print(t)
+                stop()
                 break
 
     except Exception:

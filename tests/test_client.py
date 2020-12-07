@@ -2,7 +2,6 @@ import time
 import random
 import unittest
 import threading
-import logging
 
 from rabbitmq_client.errors import ConsumerAlreadyExists
 
@@ -10,7 +9,13 @@ from rabbitmq_client.client import RMQClient
 from rabbitmq_client import rpc
 
 
+"""
+DEFINITIONS
+"""
+
+# ----------------------------------------------------------------------------
 # RPC definitions
+# ----------------------------------------------------------------------------
 RPC_SERVER_NAME = "rpc_test_server"
 
 
@@ -36,10 +41,11 @@ def wait_until_rpc_ready(test, client, rpc_type, timeout=2.0):
 
             time.sleep(0.1)
             time_waited += 0.1
-# RPC definitions end
 
 
+# ----------------------------------------------------------------------------
 # Subscription definitions
+# ----------------------------------------------------------------------------
 TEST_TOPIC_1 = "topic1"
 TEST_TOPIC_2 = "topic2"
 TEST_TOPIC_3 = "topic3"
@@ -55,12 +61,17 @@ def wait_until_subscribed(test, client, topic, timeout=2.0):
 
         time.sleep(0.1)
         time_waited += 0.1
-# Subscriptions definitions end
 
 
-# COMMAND QUEUE DEFINITIONS
+# ----------------------------------------------------------------------------
+# Command queue definitions
+# ----------------------------------------------------------------------------
 COMMAND_QUEUE = "command_queue_name"
-# COMMAND QUEUE DEFINITIONS end
+
+
+"""
+Test cases
+"""
 
 
 class TestSubscription(unittest.TestCase):
@@ -384,25 +395,71 @@ class TestShutdown(unittest.TestCase):
         # ensuring synchronous termination.
         self.assertEqual(1, threading.active_count())
 
-    def test_shutdown_correct_thread_count_w_logging(self):
+    def test_shutdown_multiple_clients(self):
         """
-        Verifies the correct thread count after client with logging enabled is
-        stopped.
+        Verify that multiple clients can be started and stopped individually.
+        Resources are not shared between them. Clients shall be threadsafe.
+
+        ORIGIN: log module shared between clients, causing shutdown problems.
         """
-        client = RMQClient(log_level=logging.DEBUG)
-        client.start()
+        client_1 = RMQClient()
+        client_1.start()
 
-        # At the time of writing, this starts the QueueFeederThread for the
-        # Consumer _work_queue, ensuring a correct thread count reading.
-        client.enable_rpc_server(RPC_SERVER_NAME, rpc_request_handler)
-        wait_until_rpc_ready(self, client, "server")
+        client_1.enable_rpc_server(RPC_SERVER_NAME + "1", rpc_request_handler)
+        wait_until_rpc_ready(self, client_1, "server")
 
-        # Additional threads for logging queue listener and the
-        # QueueFeederThread of the logging queue.
+        # Expected thread count from one client
+        # 1. Main thread
+        # 2. Consumer monitor
+        # 3. Consumer work queue (from starting RPC server)
+        self.assertEqual(3, threading.active_count())
+
+        # Start client 2
+        client_2 = RMQClient()
+        client_2.start()
+
+        client_2.enable_rpc_server(RPC_SERVER_NAME + "2", rpc_request_handler)
+        client_2.enable_rpc_client()
+        wait_until_rpc_ready(self, client_2, "server")
+        wait_until_rpc_ready(self, client_2, "client")
+
+        # Expected thread count from two clients
+        # + Consumer monitor
+        # + Consumer work queue (from starting RPC server)
         self.assertEqual(5, threading.active_count())
 
-        client.stop()
+        # Produce 1 item to increase thread count
+        client_2.rpc_call(RPC_SERVER_NAME + "1", b'well hello there')
 
+        # Expected thread count after producing a message
+        # + Client 1 Producer work queue (RPC response)
+        # + Client 2 Producer work queue
+        self.assertEqual(7, threading.active_count())
+
+        # Stop the first client
+        client_1.stop()
+        # print("Remaining threads after client_1 was stopped:")
+        # for thread in threading.enumerate():
+        #     print(thread)
+
+        # Expected thread count after stopping the first client, who did not
+        # produce anything.
+        # - Consumer monitor
+        # - Consumer work queue
+        # - Producer work queue
+        self.assertEqual(4, threading.active_count())
+
+        # Stop the second client
+        client_2.stop()
+        # print("Remaining threads after client_2 was also stopped:")
+        # for thread in threading.enumerate():
+        #     print(thread)
+
+        # Expected thread count after stopping both clients
+        # - Consumer monitor
+        # - Consumer work thread
+        # - Producer work thread
+        # ONLY MAIN THREAD SHALL REMAIN!
         self.assertEqual(1, threading.active_count())
 
 

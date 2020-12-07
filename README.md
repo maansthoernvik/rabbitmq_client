@@ -25,3 +25,42 @@ Lets a service define a named RPC queue allowing other services to post messages
 ### Command queues
 
 Queues consumed from by a single service, command queues gives a service a way of exposing an API to other services. Commands can be sent to the named queue and the owning service consumes from it.
+
+## Logging
+
+`rabbitmq_client` uses python logging, to tap into the logging flow you need to provide a `Queue` object from the `multiprocessing` module when instantiating the client (the ´log_queue´ kwarg). A queue is used since the consumer and producer is run in separate processes, and to streamline handling of logging records, each log record from all processes is put on a single queue. The consumer and producer processes set up ´QueueHandler´s each with ´log_level´ set to ´logging.DEBUG´. This means that ALL log records will be put on the ´multiprocessing.Queue´.
+
+An application using the ´rabbitmq_client´ that wants to enable logging needs to do the following BEFORE instantiating the ´rabbitmq_client´:
+
+```
+# Configure the logger for the current process, log to a queue handler
+logger = logging.getLogger('rabbitmq_client')
+
+queue = multiprocessing.Queue()
+queue_handler = logging.handlers.QueueHandler(queue)
+queue_handler.setLevel(WANTED_LOGGING_LEVEL)
+
+logger.addHandler(queue_handler)
+
+# Create a handler of your choice to log messages, this is where all client
+# logging messages will end up
+file_handler = logging.FileHandler("rmq_client.log", mode='w')
+file_handler.setLevel(WANTED_LOGGING_LEVEL)
+
+# The queue listener is the final handler for all logging messages related to
+# the client
+listener = logging.handlers.QueueListener(
+    queue,
+    file_handler,
+    respect_handler_level=True
+)
+listener.start()
+
+# Now declare the client and pass the log queue to it. The client will
+# ensure that the consumer and producer processes put all logging messages on
+# the supplied queue
+client = RMQClient(log_queue=queue)
+client.start()
+```
+
+The example above ensures all processes log to the file ´rmq_client.log´, and that the application using ´rabbitmq_client´ can determine the log level using the ´respect_handler_level´ kwarg.

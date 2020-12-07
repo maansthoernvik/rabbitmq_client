@@ -11,32 +11,37 @@ from rabbitmq_client import log
 LOGGER = logging.getLogger(__name__)
 
 
-def create_consumer_connection(connection_parameters,
-                               work_queue,
+def create_consumer_connection(work_queue,
                                consumed_messages,
-                               log_queue,
-                               log_level):
+                               log_queue=None,
+                               connection_parameters=None):
     """
     Interface function to instantiate and connect a consumer connection. This
     function is intended as a target for a new process to avoid having to
     instantiate the RMQConsumerConnection outside of the new process' memory
     context.
 
-    :param connection_parameters: pika.ConnectionParameters or None
-    :param IPCQueue work_queue: process shared queue used to issue work for the
+    :param work_queue: process shared queue used to issue work for the
                                 consumer connection
-    :param IPCQueue consumed_messages: process shared queue used to forward
-                                       messages received for a subscribed topic
-                                       to the controlling process
-    :param log_queue: queue to post log writes to
-    :param log_level: log level
+    :type work_queue: multiprocessing.Queue
+    :param consumed_messages: process shared queue used to forward
+                              messages received for a subscribed topic
+                              to the controlling process
+    :type consumed_messages: multiprocessing.Queue
+    :param log_queue: queue to post logging messages to
+    :type log_queue: multiprocessing.Queue
+    :param connection_parameters: connection parameters to the RMQ server
+    :type connection_parameters: pika.ConnectionParameters
     """
     # Configure logging
-    log.set_process_log_handler(log_queue, log_level)
+    if log_queue:
+        log.set_process_log_handler(log_queue, logging.DEBUG)
 
-    consumer_connection = RMQConsumerConnection(connection_parameters,
-                                                work_queue,
-                                                consumed_messages)
+    consumer_connection = RMQConsumerConnection(
+        work_queue,
+        consumed_messages,
+        connection_parameters=connection_parameters
+    )
     consumer_connection.connect()
 
 
@@ -53,9 +58,9 @@ class RMQConsumerConnection(RMQConnection):
     """
 
     def __init__(self,
-                 connection_parameters,
                  work_queue,
-                 consumed_messages):
+                 consumed_messages,
+                 connection_parameters=None):
         """
         Initializes the RMQConsumerConnection with two queues and binds signal
         handlers. The two queues are used to communicate between the connection
@@ -63,12 +68,15 @@ class RMQConsumerConnection(RMQConnection):
         and the consumed messages queue is used to forward received messages to
         the controlling process.
 
-        :param connection_parameters: pika.ConnectionParameters or None
         :param work_queue: process shared queue used to issue work for the
                            consumer connection
+        :type work_queue: multiprocessing.Queue
         :param consumed_messages: process shared queue used to forward messages
                                   received for a subscribed topic to the
                                   controlling process
+        :type consumed_messages: multiprocessing.Queue
+        :param connection_parameters: connection parameters to the RMQ server
+        :type connection_parameters: pika.ConnectionParameters
         """
         LOGGER.debug("__init__")
 
@@ -80,7 +88,7 @@ class RMQConsumerConnection(RMQConnection):
         signal.signal(signal.SIGINT, self.interrupt)
         signal.signal(signal.SIGTERM, self.terminate)
 
-        super().__init__(connection_parameters)
+        super().__init__(connection_parameters=connection_parameters)
 
     def on_connection_open(self, connection):
         """

@@ -6,8 +6,13 @@ from threading import Lock
 from pika.spec import Basic, BasicProperties
 
 from rabbitmq_client.common_defs import EXCHANGE_TYPE_FANOUT
-from rabbitmq_client.producer_defs import Publish, RPCRequest, RPCResponse, \
-                                          Command, DEFAULT_EXCHANGE
+from rabbitmq_client.producer_defs import (
+    Publish,
+    RPCRequest,
+    RPCResponse,
+    Command,
+    DEFAULT_EXCHANGE
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -18,6 +23,7 @@ def max_attempts_reached(work):
     Checks if max attemts have been reached.
 
     :param work: true if work.attempts > work.MAX_ATTEMPTS
+    :type work: rabbitmq_client.producer_defs.GenProduce
     """
     if work.attempts > work.MAX_ATTEMPTS:
         return True
