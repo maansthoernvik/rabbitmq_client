@@ -64,4 +64,4 @@ client = RMQClient(log_queue=queue)
 client.start()
 ```
 
-The example above ensures all processes log to the file ´rmq_client.log´, and that the application using ´rabbitmq_client´ can determine the log level using the ´respect_handler_level´ kwarg.
+The example above ensures all processes log to the file `rmq_client.log`, and that the application using `rabbitmq_client` can determine the log level using the `respect_handler_level` kwarg.
