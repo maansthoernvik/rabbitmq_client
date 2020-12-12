@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 
 
 TOP_LOGGER_NAME = "rabbitmq_client"
