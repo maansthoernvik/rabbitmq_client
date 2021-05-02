@@ -71,16 +71,9 @@ if __name__ == "__main__":
                                             credentials=credentials)
 
     if args.logging:
-        log_queue = Queue()
-
         # Current process handler
         logger = logging.getLogger("rabbitmq_client")
         logger.setLevel(logging.DEBUG)
-        queue_handler = QueueHandler(log_queue)
-        queue_handler.setLevel(logging.DEBUG)
-        logger.addHandler(queue_handler)
-
-        # Final logging destination
         stream_handler = StreamHandler()
         stream_handler.setLevel(logging.DEBUG)
         formatter = logging.Formatter(fmt="{asctime} {levelname:^8} "
@@ -88,17 +81,9 @@ if __name__ == "__main__":
                                       style="{",
                                       datefmt="%d/%m/%Y %H:%M:%S")
         stream_handler.setFormatter(formatter)
-        listener = QueueListener(
-            log_queue,
-            stream_handler,
-            respect_handler_level=True
-        )
-        listener.start()
-    else:
-        log_queue = None
+        logger.addHandler(stream_handler)
 
-    client = RMQClient(log_queue=log_queue,
-                       connection_parameters=conn_params)
+    client = RMQClient(connection_parameters=conn_params)
     print("starting RMQ client")
     client.start()
     time.sleep(1)
@@ -113,14 +98,6 @@ if __name__ == "__main__":
     def stop():
         print("Stopping test program")
         client.stop()
-
-        if args.logging:
-            print("Logging activated, stopping queue and listener")
-            listener.stop()
-            while not log_queue.empty():
-                log_queue.get()
-            log_queue.close()
-            log_queue.join_thread()
 
         print(f"Threads after client stop: {threading.active_count()}")
         for t in threading.enumerate():
@@ -182,7 +159,7 @@ if __name__ == "__main__":
 
             elif inp == "command":
                 print("Command being sent to command_queue")
-                client.command("command_queue", "command message")
+                client.command("command_queue", b"command message")
 
             elif inp == "list-threads":
                 print(f"Threads started: {threading.active_count()}")
