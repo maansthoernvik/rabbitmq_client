@@ -1,4 +1,3 @@
-import signal
 import logging
 
 from threading import Thread
@@ -8,34 +7,6 @@ from .connection import RMQConnection
 
 
 LOGGER = logging.getLogger(__name__)
-
-
-def create_consumer_connection(work_queue,
-                               consumed_messages,
-                               connection_parameters=None):
-    """
-    Interface function to instantiate and connect a consumer connection. This
-    function is intended as a target for a new process to avoid having to
-    instantiate the RMQConsumerConnection outside of the new process' memory
-    context.
-
-    :param work_queue: process shared queue used to issue work for the
-                                consumer connection
-    :type work_queue: multiprocessing.Queue
-    :param consumed_messages: process shared queue used to forward
-                              messages received for a subscribed topic
-                              to the controlling process
-    :type consumed_messages: multiprocessing.Queue
-    :param connection_parameters: connection parameters to the RMQ server
-    :type connection_parameters: pika.ConnectionParameters
-    """
-
-    consumer_connection = RMQConsumerConnection(
-        work_queue,
-        consumed_messages,
-        connection_parameters=connection_parameters
-    )
-    consumer_connection.connect()
 
 
 class RMQConsumerConnection(RMQConnection):
@@ -77,9 +48,6 @@ class RMQConsumerConnection(RMQConnection):
 
         self._channel = RMQConsumerChannel(consumed_messages)
         self._work_thread = Thread(target=self.monitor_work_queue, daemon=True)
-
-        signal.signal(signal.SIGINT, self.interrupt)
-        signal.signal(signal.SIGTERM, self.terminate)
 
         super().__init__(connection_parameters=connection_parameters)
 
@@ -147,27 +115,3 @@ class RMQConsumerConnection(RMQConnection):
             consume = self._work_queue.get()
             LOGGER.debug("got work to do")
             self._channel.handle_consume(consume)
-
-    def interrupt(self, _signum, _frame):
-        """
-        Signal handler for signal.SIGINT.
-
-        :param int _signum: signal.SIGINT
-        :param ??? _frame: current stack frame
-        """
-        LOGGER.debug("interrupt")
-        self.stop()
-
-    def terminate(self, _signum, _frame):
-        """
-        Signal handler for signal.SIGTERM.
-
-        :param int _signum: signal.SIGTERM
-        :param ??? _frame: current stack frame
-        """
-        LOGGER.debug("terminate")
-        self.stop()
-
-    def stop(self):
-        """General stop handler function."""
-        self.disconnect()

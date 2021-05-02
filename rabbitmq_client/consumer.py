@@ -1,11 +1,11 @@
 import logging
 
-from multiprocessing import Queue as IPCQueue, Process
+from multiprocessing import Queue as IPCQueue
 from threading import Thread
 
 from rabbitmq_client.errors import ConsumerAlreadyExists
 
-from rabbitmq_client.consumer_connection import create_consumer_connection
+from rabbitmq_client.consumer_connection import RMQConsumerConnection
 from rabbitmq_client.common_defs import Printable
 from rabbitmq_client.consumer_defs import (
     Subscription,
@@ -97,19 +97,26 @@ class RMQConsumer:
 
         self._work_queue = IPCQueue()
         self._consumed_messages = IPCQueue()
+        #
+        # self._connection_process = Process(
+        #     target=create_consumer_connection,
+        #     args=(
+        #         self._work_queue,
+        #         self._consumed_messages
+        #     ),
+        #     kwargs={
+        #         'connection_parameters': connection_parameters
+        #     }
+        # )
 
-        self._connection_process = Process(
-            target=create_consumer_connection,
-            args=(
-                self._work_queue,
-                self._consumed_messages
-            ),
-            kwargs={
-                'connection_parameters': connection_parameters
-            }
+        self._connection = RMQConsumerConnection(
+            self._work_queue,
+            self._consumed_messages,
+            connection_parameters=connection_parameters
         )
 
         self._monitoring_thread = Thread(target=self.consume, daemon=True)
+        self._connection_thread = Thread(target=self.connect)
 
     def start(self):
         """
@@ -122,8 +129,8 @@ class RMQConsumer:
         """
         LOGGER.info("start")
 
-        self._connection_process.start()
         self._monitoring_thread.start()
+        self._connection_thread.start()
 
     def stop(self):
         """
@@ -134,13 +141,8 @@ class RMQConsumer:
         self._consumed_messages.put(StopConsumer())
         self._monitoring_thread.join()
 
-        self._connection_process.terminate()
-        self._connection_process.join(timeout=2)
-
-        if self._connection_process.exitcode is not None:
-            self._connection_process.close()  # Release resources
-        else:
-            LOGGER.warning("Consumer process did not exit within time limit")
+        self._connection.disconnect()
+        self._connection_thread.join()
 
     def add_new_consumer(self, new_consumer: Consumer):
         """
@@ -182,6 +184,12 @@ class RMQConsumer:
             elif isinstance(message, StopConsumer):
                 self.flush_and_close_queues()
                 break
+
+    def connect(self):
+        """
+        Initiates the underlying connection.
+        """
+        self._connection.connect()
 
     def flush_and_close_queues(self):
         """
