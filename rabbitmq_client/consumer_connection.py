@@ -5,7 +5,6 @@ from threading import Thread
 
 from .consumer_channel import RMQConsumerChannel
 from .connection import RMQConnection
-from rabbitmq_client import log
 
 
 LOGGER = logging.getLogger(__name__)
@@ -13,7 +12,6 @@ LOGGER = logging.getLogger(__name__)
 
 def create_consumer_connection(work_queue,
                                consumed_messages,
-                               log_queue=None,
                                connection_parameters=None):
     """
     Interface function to instantiate and connect a consumer connection. This
@@ -28,14 +26,9 @@ def create_consumer_connection(work_queue,
                               messages received for a subscribed topic
                               to the controlling process
     :type consumed_messages: multiprocessing.Queue
-    :param log_queue: queue to post logging messages to
-    :type log_queue: multiprocessing.Queue
     :param connection_parameters: connection parameters to the RMQ server
     :type connection_parameters: pika.ConnectionParameters
     """
-    # Configure logging
-    if log_queue:
-        log.set_process_log_handler(log_queue, logging.DEBUG)
 
     consumer_connection = RMQConsumerConnection(
         work_queue,

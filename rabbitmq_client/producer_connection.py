@@ -5,14 +5,12 @@ from threading import Thread
 
 from .producer_channel import RMQProducerChannel
 from .connection import RMQConnection
-from rabbitmq_client import log
 
 
 LOGGER = logging.getLogger(__name__)
 
 
 def create_producer_connection(work_queue,
-                               log_queue=None,
                                connection_parameters=None):
     """
     Interface function to instantiate and connect a producer connection. This
@@ -23,14 +21,9 @@ def create_producer_connection(work_queue,
     :param work_queue: process shared queue used to issue work for the
                        producer connection
     :type work_queue: multiprocessing.Queue
-    :param log_queue: queue to post logging messages to
-    :type log_queue: multiprocessing.Queue
     :param connection_parameters: connection parameters to the RMQ server
     :type connection_parameters: pika.ConnectionParameters
     """
-    # Configure logging
-    if log_queue:
-        log.set_process_log_handler(log_queue, logging.DEBUG)
 
     producer_connection = RMQProducerConnection(
         work_queue,

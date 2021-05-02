@@ -14,27 +14,16 @@ class RMQClient:
     power of RabbitMQ and the awesome pika Python library.
     """
 
-    def __init__(self,
-                 log_queue=None,
-                 connection_parameters=None,
-                 daemonize=False):
+    def __init__(self, connection_parameters=None):
         """
-        :param log_queue: queue to post logging messages to
-        :type log_queue: multiprocessing.Queue
         :param connection_parameters: connection parameters to the RMQ server
         :type connection_parameters: pika.ConnectionParameters
-        :param daemonize: True if connection processes should be daemons
-        :type daemonize: bool
         """
         self._consumer = RMQConsumer(
-            log_queue=log_queue,
             connection_parameters=connection_parameters,
-            daemonize=daemonize
         )
         self._producer = RMQProducer(
-            log_queue=log_queue,
             connection_parameters=connection_parameters,
-            daemonize=daemonize
         )
 
         # RPC lives in the current process, no log queue propagation necessary.

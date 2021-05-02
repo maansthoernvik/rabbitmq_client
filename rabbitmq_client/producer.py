@@ -28,29 +28,21 @@ class RMQProducer:
     """
 
     def __init__(self,
-                 log_queue=None,
-                 connection_parameters=None,
-                 daemonize=False):
+                 connection_parameters=None):
         """
-        :param log_queue: queue to post logging messages to
-        :type log_queue: multiprocessing.Queue
         :param connection_parameters: connection parameters to the RMQ server
         :type connection_parameters: pika.ConnectionParameters
-        :param daemonize: True if connection processes should be daemons
-        :type daemonize: bool
         """
         LOGGER.debug("__init__")
 
         self._work_queue = IPCQueue()
 
         self._connection_process = Process(
-            daemon=daemonize,
             target=create_producer_connection,
             args=(
                 self._work_queue,
             ),
             kwargs={
-                'log_queue': log_queue,
                 'connection_parameters': connection_parameters
             }
         )

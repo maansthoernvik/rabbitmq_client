@@ -83,20 +83,13 @@ class RMQConsumer:
     To support RPC, subscriptions are added with the preserve flag, and the
     whole ConsumedMessage is forwarded to the RPCHandler. Other than that, the
     RPC support works by subscribing just like any other subscription, only
-    that the recepient is the RPCHandler.
+    that the recipient is the RPCHandler.
     """
 
-    def __init__(self,
-                 log_queue=None,
-                 connection_parameters=None,
-                 daemonize=False):
+    def __init__(self, connection_parameters=None):
         """
-        :param log_queue: queue to post logging messages to
-        :type log_queue: multiprocessing.Queue
         :param connection_parameters: connection parameters to the RMQ server
         :type connection_parameters: pika.ConnectionParameters
-        :param daemonize: True if connection processes should be daemons
-        :type daemonize: bool
         """
         LOGGER.debug("__init__")
 
@@ -106,14 +99,12 @@ class RMQConsumer:
         self._consumed_messages = IPCQueue()
 
         self._connection_process = Process(
-            daemon=daemonize,
             target=create_consumer_connection,
             args=(
                 self._work_queue,
                 self._consumed_messages
             ),
             kwargs={
-                'log_queue': log_queue,
                 'connection_parameters': connection_parameters
             }
         )
