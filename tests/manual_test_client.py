@@ -73,9 +73,9 @@ if __name__ == "__main__":
     if args.logging:
         # Current process handler
         logger = logging.getLogger("rabbitmq_client")
-        logger.setLevel(logging.DEBUG)
+        logger.setLevel(logging.INFO)
         stream_handler = StreamHandler()
-        stream_handler.setLevel(logging.DEBUG)
+        stream_handler.setLevel(logging.INFO)
         formatter = logging.Formatter(fmt="{asctime} {levelname:^8} "
                                           "{name} {message}",
                                       style="{",
@@ -86,7 +86,6 @@ if __name__ == "__main__":
     client = RMQClient(connection_parameters=conn_params)
     print("starting RMQ client")
     client.start()
-    time.sleep(1)
 
     print(f"Threads after client start: {threading.active_count()}")
 

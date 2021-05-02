@@ -86,6 +86,13 @@ class TestSubscription(unittest.TestCase):
         self.client = RMQClient()
         self.client.start()
 
+    def tearDown(self):
+        """
+        Stops the client to release allocated resources at the end of each
+        test.
+        """
+        self.client.stop()
+
     def test_single_subscription(self):
         """
         Verifies a single subscription and publishing for said subscription.
@@ -252,13 +259,6 @@ class TestSubscription(unittest.TestCase):
                       possible")
         except ConsumerAlreadyExists:
             pass  # the test case
-
-    def tearDown(self):
-        """
-        Stops the client to release allocated resources at the end of each
-        test.
-        """
-        self.client.stop()
 
 
 class TestRPC(unittest.TestCase):

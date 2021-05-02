@@ -1,4 +1,3 @@
-import signal
 import logging
 
 from threading import Thread

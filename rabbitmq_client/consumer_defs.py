@@ -131,11 +131,3 @@ class ConsumedMessage(Printable):
         self.routing_key = routing_key if routing_key else ""
         self.correlation_id = correlation_id if correlation_id else None
         self.reply_to = reply_to if reply_to else None
-
-
-class StopConsumer(Printable):
-    """
-    Tell the monitoring thread to stop, posted not from the consumer
-    connection, but a Consumer class instance, when stop is called.
-    """
-    pass

@@ -1,7 +1,5 @@
 import logging
 
-from threading import Thread
-
 from .consumer_channel import RMQConsumerChannel
 from .connection import RMQConnection
 
@@ -22,32 +20,16 @@ class RMQConsumerConnection(RMQConnection):
     """
 
     def __init__(self,
-                 work_queue,
-                 consumed_messages,
+                 on_message_callback,
                  connection_parameters=None):
         """
-        Initializes the RMQConsumerConnection with two queues and binds signal
-        handlers. The two queues are used to communicate between the connection
-        and controlling process. The work queue can be used to issue commands,
-        and the consumed messages queue is used to forward received messages to
-        the controlling process.
-
-        :param work_queue: process shared queue used to issue work for the
-                           consumer connection
-        :type work_queue: multiprocessing.Queue
-        :param consumed_messages: process shared queue used to forward messages
-                                  received for a subscribed topic to the
-                                  controlling process
-        :type consumed_messages: multiprocessing.Queue
+        :param on_message_callback: callback for when a message is consumed
         :param connection_parameters: connection parameters to the RMQ server
         :type connection_parameters: pika.ConnectionParameters
         """
         LOGGER.debug("__init__")
 
-        self._work_queue = work_queue
-
-        self._channel = RMQConsumerChannel(consumed_messages)
-        self._work_thread = Thread(target=self.monitor_work_queue, daemon=True)
+        self._channel = RMQConsumerChannel(on_message_callback)
 
         super().__init__(connection_parameters=connection_parameters)
 
@@ -85,33 +67,18 @@ class RMQConsumerConnection(RMQConnection):
         """
         LOGGER.debug("on_channel_open")
 
-        self.consumer_connection_started()
+    def subscribe(self, subscription):
+        """"""
+        self._channel.handle_consume(subscription)
 
-    def consumer_connection_started(self):
-        """
-        Shall be called when the consumer connection has been established to
-        the point where it is ready to receive work from its controlling
-        process. In this case, when a channel has been established.
-        """
-        LOGGER.info("consumer_connection_started")
+    def rpc_server(self, rpc_server):
+        """"""
+        self._channel.handle_consume(rpc_server)
 
-        self._work_thread.start()
+    def rpc_client(self, rpc_client):
+        """"""
+        self._channel.handle_consume(rpc_client)
 
-    def monitor_work_queue(self):
-        """
-        NOTE!
-
-        This function should live in its own thread so that the
-        RMQConsumerConnection is able to respond to incoming work as quickly as
-        possible.
-
-        Monitors the consumer connection's work queue and executes from it as
-        soon as work is available.
-        """
-        while True:
-            LOGGER.debug("monitor_work_queue waiting for work")
-
-            # Blocking, set block=false to not block
-            consume = self._work_queue.get()
-            LOGGER.debug("got work to do")
-            self._channel.handle_consume(consume)
+    def command_queue(self, command_queue):
+        """"""
+        self._channel.handle_consume(command_queue)

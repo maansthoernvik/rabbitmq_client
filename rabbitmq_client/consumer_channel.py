@@ -1,5 +1,6 @@
 import functools
 import logging
+from queue import Queue
 
 from .consumer_defs import Subscription, RPCServer, RPCClient, \
                            ConsumedMessage, ConsumeOk, CommandQueue, \
@@ -16,17 +17,19 @@ class RMQConsumerChannel:
     exchanges, consuming and error handling.
     """
 
-    def __init__(self, consumed_messages):
+    def __init__(self, on_message_callback):
         """
-        :param consumed_messages: IPC queue used to relay consumed messages
-                                  between processes
+        :param on_message_callback: callback for when a message is consumed
         """
         LOGGER.debug("__init__")
 
-        self._consumed_messages = consumed_messages
+        self._on_message_callback = on_message_callback
 
         self._channel = None
         self._open = False
+
+        # Handle work received when channel was closed in a FIFO manner.
+        self._buffer = Queue()
 
     def open_channel(self, connection, notify_callback):
         """
@@ -61,6 +64,10 @@ class RMQConsumerChannel:
 
         notify_callback()
 
+        while not self._buffer.empty():
+            consume = self._buffer.get()
+            self.handle_consume(consume)
+
     def on_channel_closed(self, _channel, reason):
         """
         Callback for channel closed.
@@ -80,6 +87,10 @@ class RMQConsumerChannel:
                         consumer
         """
         LOGGER.debug(f"handle_consume consume: {consume}")
+
+        if not self._open:
+            self._buffer.put(consume)
+            return
 
         if isinstance(consume, Subscription):
             cb = functools.partial(self.on_exchange_declared,
@@ -194,13 +205,12 @@ class RMQConsumerChannel:
         LOGGER.info(f"on_message method: {basic_deliver} properties: "
                     f"{properties} body: {body}")
 
-        self._consumed_messages.put(
+        self._on_message_callback(
             ConsumedMessage(body,
                             basic_deliver.exchange,
                             basic_deliver.routing_key,
                             properties.correlation_id if properties else None,
-                            properties.reply_to if properties else None)
-        )
+                            properties.reply_to if properties else None))
 
         self._channel.basic_ack(basic_deliver.delivery_tag)
 
@@ -213,6 +223,6 @@ class RMQConsumerChannel:
         """
         LOGGER.info("on_consume_ok frame: {}".format(frame))
 
-        self._consumed_messages.put(
+        self._on_message_callback(
             ConsumeOk(frame.method.consumer_tag, consume)
         )

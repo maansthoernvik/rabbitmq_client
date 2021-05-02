@@ -1,6 +1,5 @@
 import logging
 
-from multiprocessing import Queue as IPCQueue
 from threading import Thread
 
 from rabbitmq_client.errors import ConsumerAlreadyExists
@@ -11,7 +10,6 @@ from rabbitmq_client.consumer_defs import (
     Subscription,
     ConsumedMessage,
     ConsumeOk,
-    StopConsumer,
     RPCServer,
     RPCClient,
     CommandQueue
@@ -68,22 +66,7 @@ class Consumer(Printable):
 
 class RMQConsumer:
     """
-    Implements an asynchronous consumer for RabbitMQ.
-
-    =================
-    Pub/Sub
-    =================
-    Subscriptions can be added dynamically at any point, even before a
-    connection has been established to the RMQ-server. The operation will
-    simply be put on hold until exchanges/queues can be declared.
-
-    =================
-    RPC
-    =================
-    To support RPC, subscriptions are added with the preserve flag, and the
-    whole ConsumedMessage is forwarded to the RPCHandler. Other than that, the
-    RPC support works by subscribing just like any other subscription, only
-    that the recipient is the RPCHandler.
+    Implements a consumer for RabbitMQ.
     """
 
     def __init__(self, connection_parameters=None):
@@ -95,27 +78,11 @@ class RMQConsumer:
 
         self._consumers = list()
 
-        self._work_queue = IPCQueue()
-        self._consumed_messages = IPCQueue()
-        #
-        # self._connection_process = Process(
-        #     target=create_consumer_connection,
-        #     args=(
-        #         self._work_queue,
-        #         self._consumed_messages
-        #     ),
-        #     kwargs={
-        #         'connection_parameters': connection_parameters
-        #     }
-        # )
-
         self._connection = RMQConsumerConnection(
-            self._work_queue,
-            self._consumed_messages,
+            self._on_message,
             connection_parameters=connection_parameters
         )
 
-        self._monitoring_thread = Thread(target=self.consume, daemon=True)
         self._connection_thread = Thread(target=self.connect)
 
     def start(self):
@@ -129,7 +96,6 @@ class RMQConsumer:
         """
         LOGGER.info("start")
 
-        self._monitoring_thread.start()
         self._connection_thread.start()
 
     def stop(self):
@@ -137,9 +103,6 @@ class RMQConsumer:
         Stops the RMQConsumer, tearing down the RMQConsumerConnection process.
         """
         LOGGER.info("stop")
-
-        self._consumed_messages.put(StopConsumer())
-        self._monitoring_thread.join()
 
         self._connection.disconnect()
         self._connection_thread.join()
@@ -163,52 +126,22 @@ class RMQConsumer:
 
         self._consumers.append(new_consumer)
 
-    def consume(self):
-        """
-        Monitors the consumed_messages queue for any incoming messages.
-        """
-        LOGGER.debug("consume")
-        while True:
-            LOGGER.debug("waiting for consumed messages")
-
-            message = self._consumed_messages.get()
-            LOGGER.debug("got new consumed message")
-
-            # From Consumer connection
-            if isinstance(message, ConsumedMessage):
-                self.handle_message(message)
-            elif isinstance(message, ConsumeOk):
-                self.handle_consume_ok(message)
-
-            # For stopping the monitoring thread
-            elif isinstance(message, StopConsumer):
-                self.flush_and_close_queues()
-                break
-
     def connect(self):
         """
         Initiates the underlying connection.
         """
         self._connection.connect()
 
-    def flush_and_close_queues(self):
+    def _on_message(self, message):
         """
-        Flushed process shared queues in an attempt to stop background threads.
         """
-        LOGGER.debug("flush_and_close_queues")
-        while not self._consumed_messages.empty():
-            self._consumed_messages.get()
-        self._consumed_messages.close()
-        # In order for client.stop() to be reliable and consistent, ensure
-        # thread stop.
-        self._consumed_messages.join_thread()
+        LOGGER.debug("got new consumed message")
 
-        while not self._work_queue.empty():
-            self._work_queue.get()
-        self._work_queue.close()
-        # In order for client.stop() to be reliable and consistent, ensure
-        # thread stop.
-        self._work_queue.join_thread()
+        # From Consumer connection
+        if isinstance(message, ConsumedMessage):
+            self.handle_message(message)
+        elif isinstance(message, ConsumeOk):
+            self.handle_consume_ok(message)
 
     def handle_message(self, message: ConsumedMessage):
         """
@@ -272,7 +205,8 @@ class RMQConsumer:
         LOGGER.debug("subscribe")
 
         self.add_new_consumer(Consumer(callback, exchange=topic))
-        self._work_queue.put(Subscription(topic))
+
+        self._connection.subscribe(Subscription(topic))
 
     def is_subscribed(self, topic):
         """
@@ -311,7 +245,7 @@ class RMQConsumer:
         self.add_new_consumer(Consumer(callback,
                                        preserve=True,
                                        routing_key=queue_name))
-        self._work_queue.put(RPCServer(queue_name))
+        self._connection.rpc_server(RPCServer(queue_name))
 
     def rpc_client(self, queue_name, callback):
         """
@@ -329,7 +263,7 @@ class RMQConsumer:
         self.add_new_consumer(Consumer(callback,
                                        preserve=True,
                                        routing_key=queue_name))
-        self._work_queue.put(RPCClient(queue_name))
+        self._connection.rpc_client(RPCClient(queue_name))
 
     def is_rpc_consumer_ready(self, server_name) -> bool:
         """
@@ -358,4 +292,5 @@ class RMQConsumer:
         LOGGER.debug(f"command_queue {queue_name}")
 
         self.add_new_consumer(Consumer(callback, routing_key=queue_name))
-        self._work_queue.put(CommandQueue(queue_name))
+
+        self._connection.command_queue(CommandQueue(queue_name))
