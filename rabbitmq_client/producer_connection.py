@@ -1,7 +1,5 @@
 import logging
 
-from threading import Thread
-
 from .producer_channel import RMQProducerChannel
 from .connection import RMQConnection
 
