@@ -1,8 +1,9 @@
 import logging
 
-from multiprocessing import Queue as IPCQueue, Process
+from multiprocessing import Queue as IPCQueue
+from threading import Thread
 
-from .producer_connection import create_producer_connection
+from .producer_connection import RMQProducerConnection
 from .producer_defs import Publish, RPCRequest, RPCResponse, Command
 
 
@@ -37,15 +38,12 @@ class RMQProducer:
 
         self._work_queue = IPCQueue()
 
-        self._connection_process = Process(
-            target=create_producer_connection,
-            args=(
-                self._work_queue,
-            ),
-            kwargs={
-                'connection_parameters': connection_parameters
-            }
+        self._connection = RMQProducerConnection(
+            self._work_queue,
+            connection_parameters=connection_parameters
         )
+
+        self._connection_thread = Thread(target=self.connect)
 
     def start(self):
         """
@@ -57,7 +55,7 @@ class RMQProducer:
         """
         LOGGER.info("start")
 
-        self._connection_process.start()
+        self._connection_thread.start()
 
     def stop(self):
         """
@@ -67,13 +65,14 @@ class RMQProducer:
 
         self.flush_and_close_queues()
 
-        self._connection_process.terminate()
-        self._connection_process.join(timeout=2)
+        self._connection.disconnect()
+        self._connection_thread.join()
 
-        if self._connection_process.exitcode is not None:
-            self._connection_process.close()  # Release resources
-        else:
-            LOGGER.warning("Producer process did not exit within time limit")
+    def connect(self):
+        """
+        Initiates the underlying connection.
+        """
+        self._connection.connect()
 
     def flush_and_close_queues(self):
         """

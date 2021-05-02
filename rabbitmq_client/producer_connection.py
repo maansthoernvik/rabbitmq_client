@@ -10,28 +10,6 @@ from .connection import RMQConnection
 LOGGER = logging.getLogger(__name__)
 
 
-def create_producer_connection(work_queue,
-                               connection_parameters=None):
-    """
-    Interface function to instantiate and connect a producer connection. This
-    function is intended as a target for a new process to avoid having to
-    instantiate the RMQProducerConnection outside of the new process' memory
-    context.
-
-    :param work_queue: process shared queue used to issue work for the
-                       producer connection
-    :type work_queue: multiprocessing.Queue
-    :param connection_parameters: connection parameters to the RMQ server
-    :type connection_parameters: pika.ConnectionParameters
-    """
-
-    producer_connection = RMQProducerConnection(
-        work_queue,
-        connection_parameters=connection_parameters
-    )
-    producer_connection.connect()
-
-
 class RMQProducerConnection(RMQConnection):
     """
     This class handles a connection to a RabbitMQ server intended for a
@@ -58,11 +36,7 @@ class RMQProducerConnection(RMQConnection):
         LOGGER.debug("__init__")
 
         self._work_queue = work_queue
-
         self._channel = RMQProducerChannel()
-
-        signal.signal(signal.SIGINT, self.interrupt)
-        signal.signal(signal.SIGTERM, self.terminate)
 
         super().__init__(connection_parameters=connection_parameters)
 
@@ -132,25 +106,3 @@ class RMQProducerConnection(RMQConnection):
             work = self._work_queue.get()
             LOGGER.debug("got work to do")
             self._channel.handle_produce(work)
-
-    def interrupt(self, _signum, _frame):
-        """
-        Signal handler for signal.SIGINT.
-
-        :param int _signum: signal.SIGINT
-        :param ??? _frame: current stack frame
-        """
-        LOGGER.debug("interrupt")
-
-        self.disconnect()
-
-    def terminate(self, _signum, _frame):
-        """
-        Signal handler for signal.SIGTERM.
-
-        :param int _signum: signal.SIGTERM
-        :param ??? _frame: current stack frame
-        """
-        LOGGER.debug("terminate")
-
-        self.disconnect()
