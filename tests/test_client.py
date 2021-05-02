@@ -387,7 +387,7 @@ class TestShutdown(unittest.TestCase):
         self.assertEqual(True, publish_received)
         ###################################
 
-        self.assertEqual(4, threading.active_count())
+        self.assertEqual(3, threading.active_count())
 
         client.stop()
 
@@ -410,8 +410,8 @@ class TestShutdown(unittest.TestCase):
 
         # Expected thread count from one client
         # 1. Main thread
-        # 2. Consumer monitor
-        # 3. Consumer work queue (from starting RPC server)
+        # 2. Consumer connection thread
+        # 3. Producer connection thread
         self.assertEqual(3, threading.active_count())
 
         # Start client 2
@@ -424,41 +424,25 @@ class TestShutdown(unittest.TestCase):
         wait_until_rpc_ready(self, client_2, "client")
 
         # Expected thread count from two clients
-        # + Consumer monitor
-        # + Consumer work queue (from starting RPC server)
+        # + Client 2 Consumer connection thread
+        # + Client 2 Producer connection thread
         self.assertEqual(5, threading.active_count())
-
-        # Produce 1 item to increase thread count
-        client_2.rpc_call(RPC_SERVER_NAME + "1", b'well hello there')
-
-        # Expected thread count after producing a message
-        # + Client 1 Producer work queue (RPC response)
-        # + Client 2 Producer work queue
-        self.assertEqual(7, threading.active_count())
 
         # Stop the first client
         client_1.stop()
-        # print("Remaining threads after client_1 was stopped:")
-        # for thread in threading.enumerate():
-        #     print(thread)
 
         # Expected thread count after stopping the first client, who did not
         # produce anything.
-        # - Consumer monitor
-        # - Consumer work queue
-        # - Producer work queue
-        self.assertEqual(4, threading.active_count())
+        # - Client 1 Consumer connection thread
+        # - Client 1 Producer connection thread
+        self.assertEqual(3, threading.active_count())
 
         # Stop the second client
         client_2.stop()
-        # print("Remaining threads after client_2 was also stopped:")
-        # for thread in threading.enumerate():
-        #     print(thread)
 
         # Expected thread count after stopping both clients
-        # - Consumer monitor
-        # - Consumer work thread
-        # - Producer work thread
+        # - Client 1 Consumer connection thread
+        # - Client 1 Producer connection thread
         # ONLY MAIN THREAD SHALL REMAIN!
         self.assertEqual(1, threading.active_count())
 

@@ -1,6 +1,5 @@
 import logging
 
-from multiprocessing import Queue as IPCQueue
 from threading import Thread
 
 from .producer_connection import RMQProducerConnection
@@ -36,10 +35,7 @@ class RMQProducer:
         """
         LOGGER.debug("__init__")
 
-        self._work_queue = IPCQueue()
-
         self._connection = RMQProducerConnection(
-            self._work_queue,
             connection_parameters=connection_parameters
         )
 
@@ -63,8 +59,6 @@ class RMQProducer:
         """
         LOGGER.info("stop")
 
-        self.flush_and_close_queues()
-
         self._connection.disconnect()
         self._connection_thread.join()
 
@@ -73,18 +67,6 @@ class RMQProducer:
         Initiates the underlying connection.
         """
         self._connection.connect()
-
-    def flush_and_close_queues(self):
-        """
-        Flushed process shared queues in an attempt to stop background threads.
-        """
-        LOGGER.debug("flush_and_close_queues")
-        while not self._work_queue.empty():
-            self._work_queue.get()
-        self._work_queue.close()
-        # In order for client.stop() to be reliable and consistent, ensure
-        # thread stop.
-        self._work_queue.join_thread()
 
     def publish(self, topic, message):
         """
@@ -95,7 +77,7 @@ class RMQProducer:
         """
         LOGGER.debug("publish")
 
-        self._work_queue.put(Publish(topic, message))
+        self._connection.publish(Publish(topic, message))
 
     def rpc_request(self, receiver, message, correlation_id, reply_to):
         """
@@ -109,10 +91,10 @@ class RMQProducer:
         LOGGER.debug(f"rpc_request receiver: {receiver} message: {message} "
                      f"correlation_id: {correlation_id} reply_to: {reply_to}")
 
-        self._work_queue.put(RPCRequest(receiver,
-                                        message,
-                                        correlation_id,
-                                        reply_to))
+        self._connection.rpc_request(RPCRequest(receiver,
+                                                message,
+                                                correlation_id,
+                                                reply_to))
 
     def rpc_response(self, receiver, message, correlation_id):
         """
@@ -125,9 +107,9 @@ class RMQProducer:
         LOGGER.debug(f"rpc_reply receiver: {receiver} message: {message} "
                      f"correlation_id: {correlation_id}")
 
-        self._work_queue.put(RPCResponse(receiver,
-                                         message,
-                                         correlation_id))
+        self._connection.rpc_response(RPCResponse(receiver,
+                                                  message,
+                                                  correlation_id))
 
     def command(self, command_queue, command):
         """
@@ -140,4 +122,4 @@ class RMQProducer:
         """
         LOGGER.debug(f"command {command} to {command_queue}")
 
-        self._work_queue.put(Command(command_queue, command))
+        self._connection.command(Command(command_queue, command))

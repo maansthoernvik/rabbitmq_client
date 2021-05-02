@@ -1,6 +1,8 @@
 import functools
 import logging
 
+from queue import Queue
+
 from threading import Lock
 
 from pika.spec import Basic, BasicProperties
@@ -46,6 +48,8 @@ class RMQProducerChannel:
 
         self._channel = None
         self._open = False
+
+        self._buffer = Queue()
 
     def open_channel(self, connection, notify_callback):
         """
@@ -109,6 +113,10 @@ class RMQProducerChannel:
 
         notify_callback()
 
+        while not self._buffer.empty():
+            consume = self._buffer.get()
+            self.handle_produce(consume)
+
     def handle_produce(self, produce):
         """
         Handler function for produce work.
@@ -117,6 +125,10 @@ class RMQProducerChannel:
         :type produce: Publish | RPCRequest | RPCResponse | Command
         """
         LOGGER.debug("handle_produce work: {}".format(produce))
+
+        if not self._open:
+            self._buffer.put(produce)
+            return
 
         if max_attempts_reached(produce):
             LOGGER.critical(f"handle_rpc_response max attempts "

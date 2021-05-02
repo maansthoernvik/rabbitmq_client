@@ -20,21 +20,16 @@ class RMQProducerConnection(RMQConnection):
     """
 
     def __init__(self,
-                 work_queue,
                  connection_parameters=None):
         """
         Initializes the RMQProducerConnection's work queue and binds signal
         handlers. The work queue can be used to issue commands.
 
-        :param work_queue: process shared queue used to issue work for
-                                    the consumer connection
-        :type work_queue: multiprocessing.Queue
         :param connection_parameters: connection parameters to the RMQ server
         :type connection_parameters: pika.ConnectionParameters
         """
         LOGGER.debug("__init__")
 
-        self._work_queue = work_queue
         self._channel = RMQProducerChannel()
 
         super().__init__(connection_parameters=connection_parameters)
@@ -74,34 +69,18 @@ class RMQProducerConnection(RMQConnection):
         """
         LOGGER.debug("on_channel_open")
 
-        self.producer_connection_started()
+    def publish(self, publish):
+        """"""
+        self._channel.handle_produce(publish)
 
-    def producer_connection_started(self):
-        """
-        Shall be called when the producer connection has reached a state where
-        it is ready to receive and execute work, for instance to publish
-        messages.
-        """
-        LOGGER.info("producer_connection_started")
+    def rpc_request(self, rpc_request):
+        """"""
+        self._channel.handle_produce(rpc_request)
 
-        thread = Thread(target=self.monitor_work_queue, daemon=True)
-        thread.start()
+    def rpc_response(self, rpc_response):
+        """"""
+        self._channel.handle_produce(rpc_response)
 
-    def monitor_work_queue(self):
-        """
-        NOTE!
-
-        This function should live in its own thread so that the
-        RMQProducerConnection is able to respond to incoming work as quickly as
-        possible.
-
-        Monitors the producer connection's work queue and executes from it as
-        soon as work is available.
-        """
-        while True:
-            LOGGER.debug("monitor_work_queue waiting for work")
-
-            # Blocking, set block=false to not block
-            work = self._work_queue.get()
-            LOGGER.debug("got work to do")
-            self._channel.handle_produce(work)
+    def command(self, command):
+        """"""
+        self._channel.handle_produce(command)
