@@ -131,6 +131,7 @@ class RMQConsumer:
         Initiates the underlying connection.
         """
         self._connection.connect()
+        print("stopping consumer, ioloop broken")
 
     def _on_message(self, message):
         """
