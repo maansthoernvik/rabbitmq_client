@@ -38,9 +38,14 @@ class NotAThread:
     """
     def __init__(self, target=None):
         self.target = target
+        self.alive = False
 
     def start(self):
+        self.alive = True
         self.target()
+
+    def is_alive(self):
+        return self.alive
 
 
 class TestConnection(unittest.TestCase):
@@ -284,3 +289,35 @@ class TestConnection(unittest.TestCase):
 
         # Assertions
         self.conn_imp.on_close.assert_called()
+
+    @patch("rabbitmq_client.new_connection.SelectConnection")
+    def test_stop_failed_start_connection(self, _select_connection):
+        """
+        Verify stopping a connection that was never successfully started.
+        """
+        # Setup
+        self.conn_imp.start()
+
+        # Run test
+        self.conn_imp.stop()
+        self.conn_imp.on_connection_open_error(None, None)
+
+        # Assertions
+        self.assertTrue(self.conn_imp._closing)
+        self.assertEqual(self.conn_imp._reconnect_attempts, 0)
+
+    def test_restart_closed_connection(self):
+        """
+        Verify restarting a closed connection.
+        """
+        # Setup
+        self.conn_imp._connection = Mock()
+        self.conn_imp._connection.close.side_effect = (
+            ConnectionWrongStateError()
+        )
+
+        # Run test
+        self.conn_imp.restart()
+
+        # Assertions
+        self.assertFalse(self.conn_imp._restarting)

@@ -52,7 +52,8 @@ class RMQConnection(ABC):
         """
         LOGGER.info("starting connection")
 
-        self._connection_thread.start()
+        if not self._connection_thread.is_alive():
+            self._connection_thread.start()
 
     def restart(self):
         """
@@ -60,8 +61,11 @@ class RMQConnection(ABC):
         """
         LOGGER.info("restarting connection")
 
-        self._restarting = True
-        self._connection.close()
+        try:
+            self._connection.close()
+            self._restarting = True  # Only if connection could be closed.
+        except ConnectionWrongStateError:
+            LOGGER.info("connection closed and could not be restarted")
 
     def stop(self):
         """
@@ -150,6 +154,11 @@ class RMQConnection(ABC):
         Starts up the connection again after a gradually increasing delay.
         """
         LOGGER.info(f"reconnect, attempt no. {self._reconnect_attempts + 1}")
+
+        # Reconnect attempt may have been queued up before 'stop' was called.
+        if self._closing:
+            LOGGER.info("skipping reconnect, connection stopped")
+            return
 
         # _connect will assign a new connection object
         self._connection_thread = Thread(target=self._connect)
