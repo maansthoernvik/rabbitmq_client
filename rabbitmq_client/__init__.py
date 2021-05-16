@@ -1,3 +1,3 @@
 import logging
 
-logging.getLogger("rabbitmq_client").addHandler(logging.NullHandler())
+logging.getLogger(__name__).addHandler(logging.NullHandler())

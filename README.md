@@ -1,8 +1,15 @@
-# RabbitMQ client based on pika
+# RabbitMQ client helpers based on pika
 [![PyPI version](https://badge.fury.io/py/rabbitmq-client.svg)](https://badge.fury.io/py/rabbitmq-client)
 [![Build](https://github.com/maansthoernvik/rabbitmq_client/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/maansthoernvik/rabbitmq_client/actions/workflows/build.yml)
 
-This project provides helper classes for using RabbitMQ in Python.
+This project provides helper classes for using RabbitMQ in Python. It is 
+based on `pika`, which is an awesome no-dependency client library for 
+RabbitMQ. Similarly, this project strives for zero dependencies (except for 
+dev dependencies).
+
+By using this project, users should be able to get started with RabbitMQ in 
+Python instantly, by simply instantiating and starting a `RMQConsumer` or 
+`RMQProducer` class.
 
 ## Abstract connection helper
 
@@ -11,21 +18,26 @@ using the `pika` `SelectConnection` and `Channel` objects as it wraps them
 and provides an easy-to-use interface as well as event hooks on important
 happenings.
 
+### RMQConnection lifecycle hooks
+
 Subclassing `RMQConnection` requires the implementer to override three methods:
 `on_ready`, `on_close`, and `on_error`. 
 
-Ready is called when the connection has established a connection and opened a
-channel. 
+`on_ready` is called when `RMQConnection` has established a connection and 
+opened a channel. 
 
-Close is called when either the connection, or the channel closes for
+`on_close` is called when either the connection, or the channel closes for
 any reason. This means the implementer may receive two calls for one failed 
-connection, one for the channel and one for the connection itself. 
+connection, one for the channel and one for the connection itself. This 
+makes it important that `on_close` is made idempotent.   
 
-Error is called when a recent action failed, such as an exchange declaration
-failure. These hooks are meant to enable the implementer to react to the 
-connection state and restore an operating state. The `RMQConnection` abstract 
-base class is used by the `rabbitmq_client` project to implement its
+`on_error` is called when a recent action failed, such as an exchange 
+declaration failure. These hooks are meant to enable the implementer to react
+to the connection state and restore an operating state. The `RMQConnection` 
+abstract base class is used by the `rabbitmq_client` project to implement its
 `RMQConsumer` and `RMQProducer` classes.
+
+### RMQConnection interface methods
 
 In addition to the hooks that need to be implemented by implementing classes,
 `RMQConnection` provides three public methods that can be used to interact 
@@ -47,7 +59,26 @@ on the fly.
 closed connection. A connection for which `stop` has been called cannot be
 re-used. `on_close` is called once the connection is completely stopped.
 
-TODO: Add information on automatic reconnects.
+### Automatic reconnection
+
+`RMQConnection` will re-establish lost connections, but not lost channels. 
+Reconnections will not be done for any reason though, among the reasons for 
+reconnecting are:
+
+* pika.exceptions.ConnectionClosedByBroker
+* pika.exceptions.StreamLostError
+
+These two exceptions cover the cases where the broker has been shut down, either
+expectedly or unexpectedly, or when the connection is lost for some other 
+reason.
+
+Again, if the channel is lost, but the connection remains intact, 
+`RMQConnection` will not recover the channel.
+
+Reconnection attempts will be made with an increasing delay between attempts.
+The first attempt is instantaneous, the second is delayed by 1 second, the 
+third by 2 seconds, etc. After the 9th attempt, the following reconnects 
+will be made at 30 second intervals.
 
 ## Logging
 

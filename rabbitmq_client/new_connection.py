@@ -20,8 +20,11 @@ RECONNECT_REASONS = (
 
 class RMQConnection(ABC):
     """
+    Abstract base class to be implemented.
+
     Wraps a pika.SelectConnection and channel object to provide easy access to
-    consumer/producer implementers.
+    consumer/producer implementers. Allows for a quick start to writing
+    consumers and producers, without having to re-write the connection logic.
 
     RMQConnection signals implementers with the on_ready and on_close methods
     when the connection/channel state changes.
@@ -129,7 +132,7 @@ class RMQConnection(ABC):
         :param _connection: pika.SelectConnection
         :param reason: pika.exceptions.?
         """
-        self.on_close()  # Signal superclass that connection is down.
+        self.on_close()  # Signal subclass that connection is down.
 
         # This should ensure the current thread runs to completion after
         # on_connection_closed handling is done.
@@ -190,7 +193,7 @@ class RMQConnection(ABC):
         self._channel = channel
         self._channel.add_on_close_callback(self.on_channel_closed)
 
-        self.on_ready()  # Signal superclass that connection is ready.
+        self.on_ready()  # Signal subclass that connection is ready.
 
     def on_channel_closed(self, _channel, reason):
         """
@@ -205,7 +208,8 @@ class RMQConnection(ABC):
         """
         LOGGER.warning(f"channel closed: {reason}")
 
-        self.on_close()  # Signal superclass that connection is down.
+        # Signal subclass that connection is down.
+        self.on_close()
 
     @abstractmethod
     def on_ready(self):
