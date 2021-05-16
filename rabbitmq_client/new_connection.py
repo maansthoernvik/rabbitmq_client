@@ -46,6 +46,34 @@ class RMQConnection(ABC):
         self._closing = False
         self._restarting = False
 
+    @abstractmethod
+    def on_ready(self):
+        """
+        Implementers can handle what should happen when the RMQConnection is
+        ready for work.
+        """
+        pass
+
+    @abstractmethod
+    def on_close(self):
+        """
+        Implementers can handle what should happen when the RMQConnection is
+        suddenly closed. An on_close call will normally be followed by an
+        on_ready call from the RMQConnection unless the connection is
+        permanently down. It is possible that the RMQConnection will signal
+        multiple on_close calls for a single connection failure, therefore the
+        implementation of on_close must be idempotent.
+        """
+        pass
+
+    @abstractmethod
+    def on_error(self):
+        """
+        Implementers can handle what should happen when the RMQConnection has
+        run into an error, for example an Exchange/Queue declaration failure.
+        """
+        pass
+
     def start(self):
         """
         Starts the connection, opens a connection and a channel by running the
@@ -211,30 +239,3 @@ class RMQConnection(ABC):
         # Signal subclass that connection is down.
         self.on_close()
 
-    @abstractmethod
-    def on_ready(self):
-        """
-        Implementers can handle what should happen when the RMQConnection is
-        ready for work.
-        """
-        pass
-
-    @abstractmethod
-    def on_close(self):
-        """
-        Implementers can handle what should happen when the RMQConnection is
-        suddenly closed. An on_close call will normally be followed by an
-        on_ready call from the RMQConnection unless the connection is
-        permanently down. It is possible that the RMQConnection will signal
-        multiple on_close calls for a single connection failure, therefore the
-        implementation of on_close must be idempotent.
-        """
-        pass
-
-    @abstractmethod
-    def on_error(self):
-        """
-        Implementers can handle what should happen when the RMQConnection has
-        run into an error, for example an Exchange/Queue declaration failure.
-        """
-        pass

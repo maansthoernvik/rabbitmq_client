@@ -56,6 +56,6 @@ jobs:
 
     - name: Run unit tests
       run: |
-        coverage run --source rabbitmq_client -m unittest tests.test_connection
+        coverage run --source rabbitmq_client -m unittest discover
         coverage report -m
     # TODO: Enforce coverage does not drop.
