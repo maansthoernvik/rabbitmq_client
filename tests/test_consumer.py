@@ -6,6 +6,44 @@ from rabbitmq_client import ExchangeParams, ConsumeParams, QueueParams
 from rabbitmq_client.new_consumer import RMQConsumer, _gen_consume_key
 
 
+def queue(name):
+    return QueueParams(name)
+
+
+def exchange(name):
+    return ExchangeParams(name)
+
+
+class TestConsumeKeyGeneration(unittest.TestCase):
+
+    def test_consume_key_gen(self):
+        """Verify the consume key gen works as intended"""
+        self.assertEqual(
+            "queue|exchange|routing_key",
+            _gen_consume_key(
+                queue("queue"), exchange("exchange"), "routing_key"
+            )
+        )
+        self.assertEqual(
+            "exchange|routing_key",
+            _gen_consume_key(
+                None, exchange("exchange"), "routing_key"
+            )
+        )
+        self.assertEqual(
+            "queue|routing_key",
+            _gen_consume_key(
+                queue("queue"), None, "routing_key"
+            )
+        )
+        self.assertEqual(
+            "queue|exchange|complex.routing.key",
+            _gen_consume_key(
+                queue("queue"), exchange("exchange"), "complex.routing.key"
+            )
+        )
+
+
 class TestConsumer(unittest.TestCase):
     """
     Test the new (2021) RMQConsumer class, verify its interface methods can be
