@@ -234,8 +234,6 @@ class RMQConnection(ABC):
         :param _channel: pika.channel.Channel
         :param reason: pika.exceptions.?
         """
+        self.on_close()  # Signal subclass that connection is down.
+
         LOGGER.warning(f"channel closed: {reason}")
-
-        # Signal subclass that connection is down.
-        self.on_close()
-
