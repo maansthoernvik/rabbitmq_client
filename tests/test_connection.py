@@ -47,6 +47,9 @@ class NotAThread:
     def is_alive(self):
         return self.alive
 
+    def join(self):
+        pass
+
 
 class TestConnection(unittest.TestCase):
     """

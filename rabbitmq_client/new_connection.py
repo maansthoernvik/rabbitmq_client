@@ -80,6 +80,13 @@ class RMQConnection(ABC):
         underlying connection thread. When ready, callbacks will be invoked on
         each step of the way towards establishing the connection and channel,
         starting with on_connection_open if all went well.
+
+        NOTE! Starting the connection is not a synchronous operation! It is
+        this way since starting may or may not be successful, so a return
+        value would be necessary to indicate success/failure. But, since
+        retries will be made, an initial failure may in fact be successful the
+        next second, meaning the user is given faulty information. Start
+        success is therefore indicated via the 'on_ready' hook instead.
         """
         LOGGER.info("starting connection")
 
@@ -109,6 +116,7 @@ class RMQConnection(ABC):
 
             try:
                 self._connection.close()
+                self._connection_thread.join()
             except ConnectionWrongStateError:
                 LOGGER.info("connection already closed")
 
@@ -146,6 +154,10 @@ class RMQConnection(ABC):
         :param error: pika.exceptions.?
         """
         LOGGER.warning(f"error establishing connection, error: {error}")
+
+        # This should ensure the current thread runs to completion after
+        # reconnect handling is done.
+        self._connection.ioloop.stop()
 
         # No fancy handling, just retry even if credentials are bad.
         self._reconnect()

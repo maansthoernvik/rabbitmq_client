@@ -83,11 +83,28 @@ class RMQConsumer(RMQConnection):
         """
         super().__init__(connection_parameters=connection_parameters)
 
-        self.ready = False
+        self._ready = False
         self._consumes = dict()
 
+    @property
+    def ready(self):
+        """
+        Indicates if the consumer is ready, meaning it will immediately issue
+        consume-work it receives. If the consumer is NOT ready, incoming
+        consumes will be delayed until the underlying connection reports ready
+        through the 'on_ready' hook.
+
+        :return: bool
+        """
+        return self._ready
+
     def start(self):
-        """Starts the consumer by initiating the underlying connection."""
+        """
+        Starts the consumer by initiating the underlying connection.
+
+        NOTE! This is NOT a synchronous operation! If you must know that the
+        consumer is successfully started, monitor the 'ready' property.
+        """
         LOGGER.info("starting consumer")
 
         super().start()
@@ -103,44 +120,6 @@ class RMQConsumer(RMQConnection):
         LOGGER.info("stopping consumer")
 
         super().stop()
-
-    def on_ready(self):
-        """
-        Connection hook, called when channel opened, meaning RMQConnection is
-        ready for work.
-        """
-        LOGGER.info("consumer connection ready")
-
-        self.ready = True
-
-        for _key, consume in self._consumes.items():
-            if consume.exchange_params is None:
-                self.declare_queue(
-                    consume.queue_params,
-                    consume_params=consume.consume_params
-                )
-            else:
-                self.declare_exchange(
-                    consume.exchange_params,
-                    queue_params=consume.queue_params,
-                    routing_key=consume.routing_key,
-                    consume_params=consume.consume_params
-                )
-
-    def on_close(self):
-        """Connection hook, called when the channel or connection is closed."""
-        LOGGER.info("consumer connection closed")
-
-        self.ready = False
-
-        for _key, consume in self._consumes.items():
-            consume.consumer_tag = None
-
-    def on_error(self):
-        """
-        Connection hook, called when the connection has encountered an error.
-        """
-        LOGGER.info("consumer connection error")
 
     def consume(self,
                 consume_params,
@@ -214,3 +193,41 @@ class RMQConsumer(RMQConnection):
                 )
 
         return consume_key
+
+    def on_ready(self):
+        """
+        Connection hook, called when channel opened, meaning RMQConnection is
+        ready for work.
+        """
+        LOGGER.info("consumer connection ready")
+
+        self._ready = True
+
+        for _key, consume in self._consumes.items():
+            if consume.exchange_params is None:
+                self.declare_queue(
+                    consume.queue_params,
+                    consume_params=consume.consume_params
+                )
+            else:
+                self.declare_exchange(
+                    consume.exchange_params,
+                    queue_params=consume.queue_params,
+                    routing_key=consume.routing_key,
+                    consume_params=consume.consume_params
+                )
+
+    def on_close(self):
+        """Connection hook, called when the channel or connection is closed."""
+        LOGGER.info("consumer connection closed")
+
+        self._ready = False
+
+        for _key, consume in self._consumes.items():
+            consume.consumer_tag = None
+
+    def on_error(self):
+        """
+        Connection hook, called when the connection has encountered an error.
+        """
+        LOGGER.info("consumer connection error")
