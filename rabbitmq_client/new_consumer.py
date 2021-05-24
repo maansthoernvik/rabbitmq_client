@@ -1,7 +1,6 @@
 import logging
 
 from rabbitmq_client.new_connection import RMQConnection
-from rabbitmq_client.defs import ExchangeParams, ConsumeOK
 
 
 LOGGER = logging.getLogger(__name__)
@@ -181,39 +180,9 @@ class RMQConsumer(RMQConnection):
         )
 
         # 3. Start declaring shit
-        if self.ready:
-            if exchange_params is None:
-                self.declare_queue(
-                    queue_params,
-                    consume_params=consume_params,
-                    callback=self.on_consume_ok
-                )
-            else:
-                self.declare_exchange(
-                    exchange_params,
-                    queue_params=queue_params,
-                    routing_key=routing_key,
-                    consume_params=consume_params,
-                    callback=self.on_consume_ok
-                )
+        ...
 
         return consume_key
-
-    def on_consume_ok(self,
-                      queue_params,
-                      exchange_name,
-                      routing_key,
-                      consumer_tag):
-        """
-        Callback for when a consume has been started OK.
-        """
-        LOGGER.info(f"consume OK, queue: {queue_params.queue} "
-                    f"exchange: {exchange_name} routing_key: {routing_key}")
-        consume = self._consumes[_gen_consume_key(
-            queue_params, ExchangeParams(exchange_name), routing_key
-        )]
-        consume.consumer_tag = consumer_tag
-        consume.consume_params.on_message_callback(ConsumeOK())
 
     def on_ready(self):
         """
@@ -225,23 +194,18 @@ class RMQConsumer(RMQConnection):
         self._ready = True
 
         for _key, consume in self._consumes.items():
-            if consume.exchange_params is None:
-                self.declare_queue(
-                    consume.queue_params,
-                    consume_params=consume.consume_params,
-                    callback=self.on_consume_ok
-                )
-            else:
-                self.declare_exchange(
-                    consume.exchange_params,
-                    queue_params=consume.queue_params,
-                    routing_key=consume.routing_key,
-                    consume_params=consume.consume_params,
-                    callback=self.on_consume_ok
-                )
+            ...
+            # TODO do something
 
     def on_close(self):
-        """Connection hook, called when the channel or connection is closed."""
+        """
+        Connection hook, called when the channel or connection is closed.
+
+        NOTE!
+        This is NOT reported as an error because users are expected to
+        configure their exchanges and queues accordingly to avoid losing data
+        they cannot live without.
+        """
         LOGGER.info("consumer connection closed")
 
         self._ready = False
