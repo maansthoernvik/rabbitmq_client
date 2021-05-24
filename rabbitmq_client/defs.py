@@ -62,6 +62,10 @@ class ConsumeParams:
 
         Excluding the "passive" and "callback" options. Passive may not be used
         in this context, and callback is used by the connection object.
+
+        Queue is optional and must not be provided in case a queue is to be
+        declared before consuming will start, for example through a call to
+        RMQConsumer.consume, which takes as input QueueParams.
         """
         self.on_message_callback = on_message_callback
         self.queue = queue
@@ -69,3 +73,24 @@ class ConsumeParams:
         self.exclusive = exclusive
         self.consumer_tag = consumer_tag
         self.arguments = arguments
+
+
+class QueueBindParams:
+
+    def __init__(self,
+                 queue,
+                 exchange,
+                 routing_key=None,
+                 arguments=None):
+        """
+        # noqa 501
+        https://pika.readthedocs.io/en/stable/modules/channel.html#pika.channel.Channel.queue_bind
+        """
+        self.queue = queue
+        self.exchange = exchange
+        self.routing_key = routing_key
+        self.arguments = arguments
+
+
+class ConsumeOK:
+    pass

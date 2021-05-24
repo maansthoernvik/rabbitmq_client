@@ -4,7 +4,8 @@ import threading
 
 import sys
 
-from rabbitmq_client.new_consumer import RMQConsumer
+from rabbitmq_client import RMQConsumer
+from rabbitmq_client import ConsumeParams, QueueParams
 
 
 logger = logging.getLogger("rabbitmq_client")
@@ -24,5 +25,10 @@ def stop(*args):
 
 
 signal.signal(signal.SIGINT, stop)
+
+consumer.consume(
+    ConsumeParams(lambda x: print(x)),
+    queue_params=QueueParams("queue")
+)
 
 threading.Event().wait()

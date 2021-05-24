@@ -1,4 +1,6 @@
+import functools
 import logging
+
 from abc import ABC, abstractmethod
 
 from threading import Thread, Timer
@@ -7,8 +9,9 @@ from pika import SelectConnection
 from pika.exceptions import (
     ConnectionClosedByBroker,
     StreamLostError,
-    ConnectionWrongStateError
+    ConnectionWrongStateError, ChannelClosedByBroker
 )
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -119,6 +122,83 @@ class RMQConnection(ABC):
                 self._connection_thread.join()
             except ConnectionWrongStateError:
                 LOGGER.info("connection already closed")
+
+    def declare_queue(self,
+                      queue_params,
+                      callback=None):
+        """
+        :param queue_params: rabbitmq_client.QueueParams
+        :param callback: callable
+        """
+        cb = functools.partial(callback,
+                               queue_params)
+
+        self._channel.queue_declare(
+            queue_params.queue,
+            durable=queue_params.durable,
+            exclusive=queue_params.exclusive,
+            auto_delete=queue_params.auto_delete,
+            arguments=queue_params.arguments,
+            callback=cb
+        )
+
+    def declare_exchange(self,
+                         exchange_params,
+                         callback=None):
+        """
+        :param exchange_params: rabbitmq_client.ExchangeParams
+        :param callback: callable
+        """
+        cb = functools.partial(callback,
+                               exchange_params)
+
+        self._channel.exchange_declare(
+            exchange_params.exchange,
+            exchange_type=exchange_params.exchange_type,
+            durable=exchange_params.durable,
+            auto_delete=exchange_params.auto_delete,
+            internal=exchange_params.internal,
+            arguments=exchange_params.arguments,
+            callback=cb
+        )
+
+    def bind_queue(self,
+                   queue_bind_params,
+                   callback=None):
+        """
+        :param queue_bind_params: rabbitmq_client.QueueBindParams
+        :param callback: callable
+        """
+        cb = functools.partial(callback,
+                               queue_bind_params)
+
+        self._channel.queue_bind(
+            queue_bind_params.queue,
+            queue_bind_params.exchange,
+            routing_key=queue_bind_params.routing_key,
+            arguments=queue_bind_params.arguments,
+            callback=cb
+        )
+
+    def consume_from_queue(self,
+                           consume_params,
+                           callback=None):
+        """
+        :param consume_params: rabbitmq_client.ConsumeParams
+        :param callback: callable
+        """
+        cb = functools.partial(callback,
+                               consume_params)
+
+        self._channel.basic_consume(
+            consume_params.queue,
+            consume_params.on_message_callback,
+            auto_ack=consume_params.auto_ack,
+            exclusive=consume_params.exclusive,
+            consumer_tag=consume_params.consumer_tag,
+            arguments=consume_params.arguments,
+            callback=cb
+        )
 
     def _connect(self):
         """
@@ -249,3 +329,8 @@ class RMQConnection(ABC):
         self.on_close()  # Signal subclass that connection is down.
 
         LOGGER.warning(f"channel closed: {reason}")
+        if isinstance(reason, ChannelClosedByBroker):
+            # TODO what info to send implementer when going down permanently
+            #  like this?
+            self.on_error()
+            self.stop()

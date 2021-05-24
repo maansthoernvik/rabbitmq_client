@@ -1,16 +1,2 @@
-"""
-Consumer errors
-"""
-
-
-class ConsumerAlreadyExists(Exception):
-    pass
-
-
-"""
-RPC errors
-"""
-
-
-class RPCClientNotReady(Exception):
+class CallbackError(Exception):
     pass

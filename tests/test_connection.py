@@ -8,7 +8,13 @@ from pika.exceptions import (
     ConnectionWrongStateError
 )
 
-from rabbitmq_client.new_connection import RMQConnection
+from rabbitmq_client import (
+    RMQConnection,
+    QueueParams,
+    ExchangeParams,
+    QueueBindParams,
+    ConsumeParams,
+)
 
 
 class ConnectionImplementer(RMQConnection):
@@ -51,9 +57,11 @@ class NotAThread:
         pass
 
 
-class TestConnection(unittest.TestCase):
+class TestConnectionBase(unittest.TestCase):
     """
-    Verify the RMQConnection class can be subclassed and works as intended.
+    Verify the RMQConnection class can be subclassed and starts a connection
+    towards RabbitMQ as intended. Also verify reconnect handling and closure
+    handling of both channels and connections.
 
     SelectConnection is patched in to replace the real pika.SelectConnection
     with a MagicMock object. Thread is sometimes patched to allow assertion
@@ -324,3 +332,145 @@ class TestConnection(unittest.TestCase):
 
         # Assertions
         self.assertFalse(self.conn_imp._restarting)
+
+
+class TestConnectionDeclarations(unittest.TestCase):
+    """
+    Verify the RMQConnection's methods for declaring, binding, and consuming
+    start the intended flows. For example, declaring an exchange and supplying
+    queue parameters should result in a queue being declared after the exchange
+    has been declared successfully. Also, including consume parameters shall
+    lead to 'basic_consume' being issued.
+    """
+
+    @patch("rabbitmq_client.new_connection.SelectConnection")
+    def setUp(self, _select_connection) -> None:
+        """
+        Set up connection to be in a started state, where both connection and
+        channel objects are mock instances.
+        """
+        self.conn_imp = ConnectionImplementer()
+        self.conn_imp.start()
+        self.conn_imp.on_connection_open(None)
+        self.channel_mock = Mock()
+        self.conn_imp.on_channel_open(self.channel_mock)
+
+    @patch("rabbitmq_client.new_connection.functools")
+    def test_declare_queue(self, functools):
+        """
+        Verify declaring a queue.
+        """
+        # Prep
+        queue_params = QueueParams("queue")
+        def on_queue_declared(): ...
+
+        functools.partial.return_value = "partial"
+
+        # Test
+        self.conn_imp.declare_queue(queue_params, callback=on_queue_declared)
+
+        # Assert
+        functools.partial.assert_called_with(
+            on_queue_declared, queue_params
+        )
+        self.conn_imp._channel.queue_declare.assert_called_with(
+            queue_params.queue,
+            durable=queue_params.durable,
+            exclusive=queue_params.exclusive,
+            auto_delete=queue_params.auto_delete,
+            arguments=queue_params.arguments,
+            callback="partial"
+        )
+
+    @patch("rabbitmq_client.new_connection.functools")
+    def test_declare_exchange(self, functools):
+        """
+        Verify declaring an exchange.
+        """
+        # Prep
+        exchange_params = ExchangeParams("exchange")
+        def on_exchange_declared(): ...
+
+        functools.partial.return_value = "partial"
+
+        # Test
+        self.conn_imp.declare_exchange(
+            exchange_params, callback=on_exchange_declared
+        )
+
+        # Assert
+        functools.partial.assert_called_with(
+            on_exchange_declared, exchange_params
+        )
+        self.conn_imp._channel.exchange_declare.assert_called_with(
+            exchange_params.exchange,
+            exchange_type=exchange_params.exchange_type,
+            durable=exchange_params.durable,
+            auto_delete=exchange_params.auto_delete,
+            internal=exchange_params.internal,
+            arguments=exchange_params.arguments,
+            callback="partial"
+        )
+
+    @patch("rabbitmq_client.new_connection.functools")
+    def test_bind_queue(self, functools):
+        """
+        Verify binding a queue to an exchange.
+        """
+        # Prep
+        queue_bind_params = QueueBindParams(
+            "queue", "exchange", routing_key="routing_key"
+        )
+        def on_queue_bound(): ...
+
+        functools.partial.return_value = "partial"
+
+        # Test
+        self.conn_imp.bind_queue(
+            queue_bind_params,
+            callback=on_queue_bound
+        )
+
+        # Assert
+        functools.partial.assert_called_with(
+            on_queue_bound, queue_bind_params
+        )
+        self.conn_imp._channel.queue_bind.assert_called_with(
+            queue_bind_params.queue,
+            queue_bind_params.exchange,
+            routing_key=queue_bind_params.routing_key,
+            arguments=queue_bind_params.arguments,
+            callback="partial"
+        )
+
+    @patch("rabbitmq_client.new_connection.functools")
+    def test_consume_from_queue(self, functools):
+        """
+        Verify consuming from a queue.
+        """
+        # Prep
+        def on_msg(): ...
+        consume_params = ConsumeParams(on_msg, queue="queue")
+        def on_consume_ok(): ...
+
+        functools.partial.return_value = "partial"
+
+        # Test
+        self.conn_imp.consume_from_queue(
+            consume_params,
+            callback=on_consume_ok
+        )
+
+        # Assert
+        functools.partial.assert_called_with(
+            on_consume_ok, consume_params
+        )
+        self.conn_imp._channel.basic_consume.assert_called_with(
+            consume_params.queue,
+            on_msg,
+            auto_ack=consume_params.auto_ack,
+            exclusive=consume_params.exclusive,
+            consumer_tag=consume_params.consumer_tag,
+            arguments=consume_params.arguments,
+            callback="partial"
+        )

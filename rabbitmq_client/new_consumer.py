@@ -1,6 +1,7 @@
 import logging
 
 from rabbitmq_client.new_connection import RMQConnection
+from rabbitmq_client.defs import ExchangeParams, ConsumeOK
 
 
 LOGGER = logging.getLogger(__name__)
@@ -156,6 +157,8 @@ class RMQConsumer(RMQConnection):
         :param routing_key: str
         :returns: str
         """
+        LOGGER.info("starting consume")
+
         # 1. Checks
         if queue_params is None and exchange_params is None:
             raise ValueError(
@@ -182,17 +185,35 @@ class RMQConsumer(RMQConnection):
             if exchange_params is None:
                 self.declare_queue(
                     queue_params,
-                    consume_params=consume_params
+                    consume_params=consume_params,
+                    callback=self.on_consume_ok
                 )
             else:
                 self.declare_exchange(
                     exchange_params,
                     queue_params=queue_params,
                     routing_key=routing_key,
-                    consume_params=consume_params
+                    consume_params=consume_params,
+                    callback=self.on_consume_ok
                 )
 
         return consume_key
+
+    def on_consume_ok(self,
+                      queue_params,
+                      exchange_name,
+                      routing_key,
+                      consumer_tag):
+        """
+        Callback for when a consume has been started OK.
+        """
+        LOGGER.info(f"consume OK, queue: {queue_params.queue} "
+                    f"exchange: {exchange_name} routing_key: {routing_key}")
+        consume = self._consumes[_gen_consume_key(
+            queue_params, ExchangeParams(exchange_name), routing_key
+        )]
+        consume.consumer_tag = consumer_tag
+        consume.consume_params.on_message_callback(ConsumeOK())
 
     def on_ready(self):
         """
@@ -207,14 +228,16 @@ class RMQConsumer(RMQConnection):
             if consume.exchange_params is None:
                 self.declare_queue(
                     consume.queue_params,
-                    consume_params=consume.consume_params
+                    consume_params=consume.consume_params,
+                    callback=self.on_consume_ok
                 )
             else:
                 self.declare_exchange(
                     consume.exchange_params,
                     queue_params=consume.queue_params,
                     routing_key=consume.routing_key,
-                    consume_params=consume.consume_params
+                    consume_params=consume.consume_params,
+                    callback=self.on_consume_ok
                 )
 
     def on_close(self):
@@ -231,3 +254,9 @@ class RMQConsumer(RMQConnection):
         Connection hook, called when the connection has encountered an error.
         """
         LOGGER.info("consumer connection error")
+
+        # Possible errors:
+        # * channel died and will not recover
+        # * callback for operation failed
+        # * declaration with faulty parameters attempted
+        # TODO: Add possibility to signal user that an error has occurred.
