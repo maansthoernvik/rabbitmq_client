@@ -355,8 +355,7 @@ class TestConnectionDeclarations(unittest.TestCase):
         self.channel_mock = Mock()
         self.conn_imp.on_channel_open(self.channel_mock)
 
-    @patch("rabbitmq_client.new_connection.functools")
-    def test_declare_queue(self, functools):
+    def test_declare_queue(self):
         """
         Verify declaring a queue.
         """
@@ -364,26 +363,20 @@ class TestConnectionDeclarations(unittest.TestCase):
         queue_params = QueueParams("queue")
         def on_queue_declared(): ...
 
-        functools.partial.return_value = "partial"
-
         # Test
         self.conn_imp.declare_queue(queue_params, callback=on_queue_declared)
 
         # Assert
-        functools.partial.assert_called_with(
-            on_queue_declared, queue_params
-        )
         self.conn_imp._channel.queue_declare.assert_called_with(
             queue_params.queue,
             durable=queue_params.durable,
             exclusive=queue_params.exclusive,
             auto_delete=queue_params.auto_delete,
             arguments=queue_params.arguments,
-            callback="partial"
+            callback=on_queue_declared
         )
 
-    @patch("rabbitmq_client.new_connection.functools")
-    def test_declare_exchange(self, functools):
+    def test_declare_exchange(self):
         """
         Verify declaring an exchange.
         """
@@ -391,17 +384,12 @@ class TestConnectionDeclarations(unittest.TestCase):
         exchange_params = ExchangeParams("exchange")
         def on_exchange_declared(): ...
 
-        functools.partial.return_value = "partial"
-
         # Test
         self.conn_imp.declare_exchange(
             exchange_params, callback=on_exchange_declared
         )
 
         # Assert
-        functools.partial.assert_called_with(
-            on_exchange_declared, exchange_params
-        )
         self.conn_imp._channel.exchange_declare.assert_called_with(
             exchange_params.exchange,
             exchange_type=exchange_params.exchange_type,
@@ -409,11 +397,10 @@ class TestConnectionDeclarations(unittest.TestCase):
             auto_delete=exchange_params.auto_delete,
             internal=exchange_params.internal,
             arguments=exchange_params.arguments,
-            callback="partial"
+            callback=on_exchange_declared
         )
 
-    @patch("rabbitmq_client.new_connection.functools")
-    def test_bind_queue(self, functools):
+    def test_bind_queue(self):
         """
         Verify binding a queue to an exchange.
         """
@@ -423,8 +410,6 @@ class TestConnectionDeclarations(unittest.TestCase):
         )
         def on_queue_bound(): ...
 
-        functools.partial.return_value = "partial"
-
         # Test
         self.conn_imp.bind_queue(
             queue_bind_params,
@@ -432,19 +417,15 @@ class TestConnectionDeclarations(unittest.TestCase):
         )
 
         # Assert
-        functools.partial.assert_called_with(
-            on_queue_bound, queue_bind_params
-        )
         self.conn_imp._channel.queue_bind.assert_called_with(
             queue_bind_params.queue,
             queue_bind_params.exchange,
             routing_key=queue_bind_params.routing_key,
             arguments=queue_bind_params.arguments,
-            callback="partial"
+            callback=on_queue_bound
         )
 
-    @patch("rabbitmq_client.new_connection.functools")
-    def test_consume_from_queue(self, functools):
+    def test_consume_from_queue(self):
         """
         Verify consuming from a queue.
         """
@@ -453,8 +434,6 @@ class TestConnectionDeclarations(unittest.TestCase):
         consume_params = ConsumeParams(on_msg, queue="queue")
         def on_consume_ok(): ...
 
-        functools.partial.return_value = "partial"
-
         # Test
         self.conn_imp.consume_from_queue(
             consume_params,
@@ -462,9 +441,6 @@ class TestConnectionDeclarations(unittest.TestCase):
         )
 
         # Assert
-        functools.partial.assert_called_with(
-            on_consume_ok, consume_params
-        )
         self.conn_imp._channel.basic_consume.assert_called_with(
             consume_params.queue,
             on_msg,
@@ -472,5 +448,5 @@ class TestConnectionDeclarations(unittest.TestCase):
             exclusive=consume_params.exclusive,
             consumer_tag=consume_params.consumer_tag,
             arguments=consume_params.arguments,
-            callback="partial"
+            callback=on_consume_ok
         )

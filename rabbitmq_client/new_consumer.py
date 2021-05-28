@@ -1,27 +1,26 @@
+import functools
 import logging
 
+from rabbitmq_client.defs import QueueParams, QueueBindParams, ConsumeOK
 from rabbitmq_client.new_connection import RMQConnection
 
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _gen_consume_key(queue_params=None,
-                     exchange_params=None,
+def _gen_consume_key(queue=None,
+                     exchange=None,
                      routing_key=None):
     """
-    :param queue_params: rabbitmq_client.QueueParams
-    :param exchange_params: rabbitmq_client.ExchangeParams
+    :param queue: str
+    :param exchange: str
     :param routing_key: str
     :return: str
     """
     key_list = []
-    key_list.append(queue_params.queue) if queue_params is not None else ""
-    (
-        key_list.append(exchange_params.exchange)
-        if exchange_params is not None else ""
-    )
-    key_list.append(routing_key) if routing_key is not None else ""
+    key_list.append(queue) if queue else ""
+    key_list.append(exchange) if exchange else ""
+    key_list.append(routing_key) if routing_key else ""
 
     separator = "|"
 
@@ -166,7 +165,9 @@ class RMQConsumer(RMQConnection):
             )
 
         consume_key = _gen_consume_key(
-            queue_params, exchange_params, routing_key
+            queue_params.queue if queue_params else "",
+            exchange_params.exchange if exchange_params else "",
+            routing_key
         )
         if self._consumes.get(consume_key) is not None:
             raise ValueError(
@@ -180,9 +181,143 @@ class RMQConsumer(RMQConnection):
         )
 
         # 3. Start declaring shit
-        ...
+        if self.ready:
+            self._handle_consume(consume_params,
+                                 queue_params,
+                                 exchange_params,
+                                 routing_key)
 
         return consume_key
+
+    def _handle_consume(self,
+                        consume_params,
+                        queue_params,
+                        exchange_params,
+                        routing_key):
+        """
+        :param consume_params: rabbitmq_client.ConsumeParams
+        :param queue_params: None | rabbitmq_client.QueueParams
+        :param exchange_params: None | rabbitmq_client.ExchangeParams
+        :param routing_key: None | str
+        """
+        if queue_params is None:
+            queue_params = QueueParams("", exclusive=True)
+
+        cb = functools.partial(self.on_queue_declared,
+                               consume_params=consume_params,
+                               queue_params=queue_params,
+                               exchange_params=exchange_params,
+                               routing_key=routing_key)
+
+        self.declare_queue(queue_params, callback=cb)
+
+    def on_queue_declared(self,
+                          frame,
+                          consume_params=None,
+                          queue_params=None,
+                          exchange_params=None,
+                          routing_key=None):
+        """
+        :param frame:
+        :param consume_params:
+        :param queue_params:
+        :param exchange_params:
+        :param routing_key:
+        """
+        LOGGER.info(f"declared queue: {frame.method.queue}")
+
+        # Update the consume queue name to ensure it is set to the created
+        # queue's name
+        consume_params.queue = frame.method.queue
+
+        if exchange_params is not None:
+            cb = functools.partial(self.on_exchange_declared,
+                                   consume_params=consume_params,
+                                   queue_params=queue_params,
+                                   exchange_params=exchange_params,
+                                   routing_key=routing_key)
+
+            self.declare_exchange(exchange_params, callback=cb)
+
+        else:
+            cb = functools.partial(self.on_consume_ok,
+                                   queue_params=queue_params)
+
+            self.consume_from_queue(consume_params, callback=cb)
+
+    def on_exchange_declared(self,
+                             frame,
+                             consume_params=None,
+                             queue_params=None,
+                             routing_key=None):
+        """
+        :param frame:
+        :param consume_params:
+        :param queue_params:
+        :param routing_key:
+        """
+        LOGGER.info(f"declared exchange: {frame.method.exchange}")
+
+        cb = functools.partial(self.on_queue_bound,
+                               consume_params=consume_params,
+                               queue_params=queue_params,
+                               exchange=frame.method.exchange,
+                               routing_key=routing_key)
+
+        self.bind_queue(QueueBindParams(consume_params.queue,
+                                        frame.method.exchange,
+                                        routing_key=routing_key),
+                        callback=cb)
+
+    def on_queue_bound(self,
+                       frame,
+                       consume_params=None,
+                       queue_params=None,
+                       exchange=None,
+                       routing_key=None):
+        """
+        :param frame:
+        :param consume_params:
+        :param queue_params:
+        :param exchange:
+        :param routing_key:
+        """
+        LOGGER.info(f"queue {consume_params.queue} bound to exchange "
+                    f"{exchange}, frame={frame}")
+
+        cb = functools.partial(self.on_consume_ok,
+                               queue_params=queue_params,
+                               exchange=exchange,
+                               routing_key=routing_key)
+
+        self.consume_from_queue(consume_params, callback=cb)
+
+    def on_consume_ok(self,
+                      frame,
+                      queue_params=None,
+                      exchange=None,
+                      routing_key=None):
+        """
+        :param frame:
+        :param queue_params:
+        :param exchange:
+        :param routing_key:
+        """
+        LOGGER.info(f"consume OK for queue: {frame}")
+
+        consume_instance = self._consumes[
+            _gen_consume_key(queue=queue_params.queue,
+                             exchange=exchange,
+                             routing_key=routing_key)
+        ]
+        # Update with real consumer tag
+        consume_instance.consumer_tag = frame.method.consumer_tag
+
+        try:
+            consume_instance.consume_params.on_message_callback(ConsumeOK())
+        except Exception as e:
+            LOGGER.critical(f"sending consume OK to message callback resulted "
+                            f"in an exception: {e}")
 
     def on_ready(self):
         """
@@ -194,8 +329,10 @@ class RMQConsumer(RMQConnection):
         self._ready = True
 
         for _key, consume in self._consumes.items():
-            ...
-            # TODO do something
+            self._handle_consume(consume.consume_params,
+                                 consume.queue_params,
+                                 consume.exchange_params,
+                                 consume.routing_key)
 
     def on_close(self):
         """

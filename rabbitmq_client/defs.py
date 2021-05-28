@@ -68,11 +68,27 @@ class ConsumeParams:
         RMQConsumer.consume, which takes as input QueueParams.
         """
         self.on_message_callback = on_message_callback
-        self.queue = queue
+        self._queue = queue
         self.auto_ack = auto_ack
         self.exclusive = exclusive
-        self.consumer_tag = consumer_tag
+        self._consumer_tag = consumer_tag
         self.arguments = arguments
+
+    @property
+    def queue(self):
+        return self._queue
+
+    @queue.setter
+    def queue(self, new_value):
+        self._queue = new_value
+
+    @property
+    def consumer_tag(self):
+        return self._consumer_tag
+
+    @consumer_tag.setter
+    def consumer_tag(self, new_value):
+        self._consumer_tag = new_value
 
 
 class QueueBindParams:
