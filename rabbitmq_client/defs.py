@@ -109,4 +109,9 @@ class QueueBindParams:
 
 
 class ConsumeOK:
-    pass
+
+    def __init__(self, consumer_tag):
+        """
+        :param consumer_tag: str
+        """
+        self.consumer_tag = consumer_tag

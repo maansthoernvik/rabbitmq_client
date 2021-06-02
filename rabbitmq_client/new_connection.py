@@ -172,14 +172,16 @@ class RMQConnection(ABC):
 
     def consume_from_queue(self,
                            consume_params,
+                           on_message_callback,
                            callback=None):
         """
         :param consume_params: rabbitmq_client.ConsumeParams
+        :param on_message_callback: callable
         :param callback: callable
         """
         self._channel.basic_consume(
             consume_params.queue,
-            consume_params.on_message_callback,
+            on_message_callback,
             auto_ack=consume_params.auto_ack,
             exclusive=consume_params.exclusive,
             consumer_tag=consume_params.consumer_tag,

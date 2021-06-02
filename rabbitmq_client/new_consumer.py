@@ -218,11 +218,11 @@ class RMQConsumer(RMQConnection):
                           exchange_params=None,
                           routing_key=None):
         """
-        :param frame:
-        :param consume_params:
-        :param queue_params:
-        :param exchange_params:
-        :param routing_key:
+        :param frame: pika.frame.Method
+        :param consume_params: rabbitmq_client.ConsumeParams
+        :param queue_params: rabbitmq_client.QueueParams
+        :param exchange_params: rabbitmq_client.ExchangeParams
+        :param routing_key: str
         """
         LOGGER.info(f"declared queue: {frame.method.queue}")
 
@@ -243,7 +243,7 @@ class RMQConsumer(RMQConnection):
             cb = functools.partial(self.on_consume_ok,
                                    queue_params=queue_params)
 
-            self.consume_from_queue(consume_params, callback=cb)
+            self.consume_from_queue(consume_params, self.on_msg, callback=cb)
 
     def on_exchange_declared(self,
                              frame,
@@ -251,10 +251,10 @@ class RMQConsumer(RMQConnection):
                              queue_params=None,
                              routing_key=None):
         """
-        :param frame:
-        :param consume_params:
-        :param queue_params:
-        :param routing_key:
+        :param frame: pika.frame.Method
+        :param consume_params: rabbitmq_client.ConsumeParams
+        :param queue_params: rabbitmq_client.QueueParams
+        :param routing_key: str
         """
         LOGGER.info(f"declared exchange: {frame.method.exchange}")
 
@@ -276,11 +276,11 @@ class RMQConsumer(RMQConnection):
                        exchange=None,
                        routing_key=None):
         """
-        :param frame:
-        :param consume_params:
-        :param queue_params:
-        :param exchange:
-        :param routing_key:
+        :param frame: pika.frame.Method
+        :param consume_params: rabbitmq_client.ConsumeParams
+        :param queue_params: rabbitmq_client.QueueParams
+        :param exchange: str
+        :param routing_key: str
         """
         LOGGER.info(f"queue {consume_params.queue} bound to exchange "
                     f"{exchange}, frame={frame}")
@@ -290,7 +290,7 @@ class RMQConsumer(RMQConnection):
                                exchange=exchange,
                                routing_key=routing_key)
 
-        self.consume_from_queue(consume_params, callback=cb)
+        self.consume_from_queue(consume_params, self.on_msg, callback=cb)
 
     def on_consume_ok(self,
                       frame,
@@ -298,10 +298,10 @@ class RMQConsumer(RMQConnection):
                       exchange=None,
                       routing_key=None):
         """
-        :param frame:
-        :param queue_params:
-        :param exchange:
-        :param routing_key:
+        :param frame: pika.frame.Method
+        :param queue_params: rabbitmq_client.QueueParams
+        :param exchange: str
+        :param routing_key: str
         """
         LOGGER.info(f"consume OK for queue: {frame}")
 
@@ -310,14 +310,39 @@ class RMQConsumer(RMQConnection):
                              exchange=exchange,
                              routing_key=routing_key)
         ]
-        # Update with real consumer tag
+        # Update with real consumer tag, may or may not be the same tag.
         consume_instance.consumer_tag = frame.method.consumer_tag
 
+        # Enables lookup via consumer tag in 'on_msg'. These entries are
+        # removed 'on_close' since the consumer tags may be refreshed on
+        # reconnecting.
+        self._consumes[consume_instance.consumer_tag] = consume_instance
+
         try:
-            consume_instance.consume_params.on_message_callback(ConsumeOK())
+            consume_instance.consume_params.on_message_callback(
+                ConsumeOK(consume_instance.consumer_tag)
+            )
         except Exception as e:
             LOGGER.critical(f"sending consume OK to message callback resulted "
                             f"in an exception: {e}")
+
+    def on_msg(self, channel, basic_deliver, _basic_properties, body):
+        """
+        :param channel: pika.channel.Channel
+        :param basic_deliver: pika.spec.Basic.Deliver
+        :param _basic_properties: pika.spec.Basic.Properties
+        :param body: bytes
+        """
+        consume_params = (self._consumes[basic_deliver.consumer_tag]
+                              .consume_params)
+
+        try:
+            consume_params.on_message_callback(body)
+        except Exception as e:
+            LOGGER.critical(f"the on_message_callback for queue: "
+                            f"{consume_params.queue} crashed with error: {e}")
+
+        channel.basic_ack(delivery_tag=basic_deliver.delivery_tag)
 
     def on_ready(self):
         """
@@ -347,8 +372,16 @@ class RMQConsumer(RMQConnection):
 
         self._ready = False
 
+        old_consumer_tags = list()
         for _key, consume in self._consumes.items():
+            # Remove all consumer tag keys in local dict since these may change
+            # on re-subscription.
+            if consume.consumer_tag is not None:
+                old_consumer_tags.append(consume.consumer_tag)
             consume.consumer_tag = None
+
+        for consumer_tag in old_consumer_tags:
+            self._consumes.pop(consumer_tag, None)
 
     def on_error(self):
         """

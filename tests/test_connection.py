@@ -7,7 +7,6 @@ from pika.exceptions import (
     StreamLostError,
     ConnectionWrongStateError
 )
-
 from rabbitmq_client import (
     RMQConnection,
     QueueParams,
@@ -15,6 +14,7 @@ from rabbitmq_client import (
     QueueBindParams,
     ConsumeParams,
 )
+from tests.defs import NotAThread
 
 
 class ConnectionImplementer(RMQConnection):
@@ -34,26 +34,6 @@ class ConnectionImplementer(RMQConnection):
         pass
 
     def on_error(self):
-        pass
-
-
-class NotAThread:
-    """
-    Used to keep unittests single-threaded and avoid annoying wait-logic.
-    Implements the needed Thread interface methods like start/join/etc.
-    """
-    def __init__(self, target=None):
-        self.target = target
-        self.alive = False
-
-    def start(self):
-        self.alive = True
-        self.target()
-
-    def is_alive(self):
-        return self.alive
-
-    def join(self):
         pass
 
 
@@ -430,20 +410,22 @@ class TestConnectionDeclarations(unittest.TestCase):
         Verify consuming from a queue.
         """
         # Prep
-        def on_msg(): ...
-        consume_params = ConsumeParams(on_msg, queue="queue")
+        def consume_on_msg(): ...
+        consume_params = ConsumeParams(consume_on_msg, queue="queue")
+        def consumer_on_msg(): ...
         def on_consume_ok(): ...
 
         # Test
         self.conn_imp.consume_from_queue(
             consume_params,
+            consumer_on_msg,
             callback=on_consume_ok
         )
 
         # Assert
         self.conn_imp._channel.basic_consume.assert_called_with(
             consume_params.queue,
-            on_msg,
+            consumer_on_msg,
             auto_ack=consume_params.auto_ack,
             exclusive=consume_params.exclusive,
             consumer_tag=consume_params.consumer_tag,

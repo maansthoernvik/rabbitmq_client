@@ -25,26 +25,16 @@ class IntegrationTestConsumer(unittest.TestCase):
     def setUp(self) -> None:
         self.consumer = RMQConsumer()
         self.consumer.start()
+        self.assertTrue(started(self.consumer))
 
     def tearDown(self) -> None:
         self.consumer.stop()
-
-    def test_start_consumer(self):
-        """
-        Verify RMQConsumer, when started, successfully establishes a connection
-        to RabbitMQ.
-        """
-        # Assertions
-        self.assertEqual(True, started(self.consumer))
 
     def test_stop_consumer(self):
         """
         Verify RMQConsumer, when stopped, shuts down completely and releases
         allocated resources.
         """
-        # Set up
-        self.assertEqual(True, started(self.consumer))
-
         # Run test
         self.consumer.stop()
 

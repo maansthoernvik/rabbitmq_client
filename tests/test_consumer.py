@@ -6,9 +6,10 @@ from rabbitmq_client import (
     ExchangeParams,
     ConsumeParams,
     QueueParams,
-    QueueBindParams
+    ConsumeOK,
+    RMQConsumer
 )
-from rabbitmq_client.new_consumer import RMQConsumer, _gen_consume_key
+from rabbitmq_client.new_consumer import _gen_consume_key
 
 
 class TestConsumeKeyGeneration(unittest.TestCase):
@@ -190,7 +191,7 @@ class TestConsumer(unittest.TestCase):
 
         # Assertions
         self.consumer.consume_from_queue.assert_called_with(
-            consume_params, callback=ANY)
+            consume_params, self.consumer.on_msg, callback=ANY)
 
     def test_on_queue_declared_exchange(self):
         """
@@ -225,7 +226,6 @@ class TestConsumer(unittest.TestCase):
         frame = Mock()
         consume_params = ConsumeParams(lambda _: ...)
         queue_params = QueueParams("queue")
-        exchange_params = ExchangeParams("exchange")
 
         # Run test
         self.consumer.on_exchange_declared(frame,
@@ -262,7 +262,7 @@ class TestConsumer(unittest.TestCase):
 
         # Assertions
         self.consumer.consume_from_queue.assert_called_with(
-            consume_params, callback=ANY
+            consume_params, self.consumer.on_msg, callback=ANY
         )
 
     def test_on_consume_ok(self):
@@ -270,7 +270,16 @@ class TestConsumer(unittest.TestCase):
         Verify that the correct actions follows a consume OK.
         """
         # Prep
-        consume_params = ConsumeParams(lambda _: ...)
+        on_message_callback_called = False
+
+        def on_message_callback(msg):
+            if not isinstance(msg, ConsumeOK):
+                return
+
+            nonlocal on_message_callback_called
+            on_message_callback_called = True
+
+        consume_params = ConsumeParams(on_message_callback)
         queue_params = QueueParams("queue")
         frame = Mock()
         self.consumer.consume(consume_params, queue_params=queue_params)
@@ -285,6 +294,7 @@ class TestConsumer(unittest.TestCase):
         ]
         self.assertEqual(consume_instance.consumer_tag,
                          frame.method.consumer_tag)
+        self.assertTrue(on_message_callback_called)  # Called with ConsumeOK
 
     def test_on_ready_starts_consumes(self):
         """
@@ -330,6 +340,87 @@ class TestConsumer(unittest.TestCase):
         # Run test
         # Assertion is that no unhandled exception happens :-)
         self.consumer.on_consume_ok(Mock(), queue_params=queue_params)
+
+    def set_up_confirmed_consume(self) -> str:
+        """Helper that sets up queue-only confirmed consume."""
+        queue_params = QueueParams("queue")
+        self.consumer.consume(ConsumeParams(lambda _: ...),
+                              queue_params=queue_params)
+        frame_mock = Mock()
+        frame_mock.method.consumer_tag = "123"
+        self.consumer.on_consume_ok(frame_mock, queue_params=queue_params)
+
+        return "123"
+
+    def test_on_consume_ok_on_close_consumes_entry_handling(self):
+        """
+        Verify receiving a call to on_consume_ok creates as additional entry in
+        the _consumes dict to allow lookups of consume parameters using
+        consumer tags, and that on_close causes the deletion of this entry.
+        """
+        # Prep
+        consumer_tag = self.set_up_confirmed_consume()
+
+        # Run test + assertions
+        self.assertNotEqual(self.consumer._consumes.get(consumer_tag, None),
+                            None)  # Entry created
+        self.consumer.on_close()
+        self.assertEqual(self.consumer._consumes.get(consumer_tag, None),
+                         None)  # Now it should be gone
+
+    def test_on_msg(self):
+        """
+        Verify on_msg calls result in a call to the consumer's function as
+        well as long as a matching consumer tag entry is found.
+        """
+        # Prep
+        on_message_callback_called = False
+
+        def on_message_callback(msg):
+            if not msg == b'body' or isinstance(msg, ConsumeOK):
+                return
+
+            nonlocal on_message_callback_called
+            on_message_callback_called = True
+
+        queue_params = QueueParams("queue")
+        self.consumer.consume(ConsumeParams(on_message_callback),
+                              queue_params=queue_params)
+        frame_mock = Mock()
+        frame_mock.method.consumer_tag = "123"
+        self.consumer.on_consume_ok(frame_mock, queue_params=queue_params)
+        deliver_mock = Mock()
+        deliver_mock.consumer_tag = "123"
+
+        # Run test
+        self.consumer.on_msg(Mock(), deliver_mock, Mock(), b"body")
+
+        # Assertions
+        self.assertTrue(on_message_callback_called)
+
+    def test_on_msg_callback_raises_exception(self):
+        """
+        Verify that exceptions raised from the consumer callback as a result of
+        an on_msg invocation does not lead to an exception in RMQConsumer.
+        """
+        # Prep
+        def on_message_callback(msg):
+            if isinstance(msg, ConsumeOK):
+                return
+
+            raise ValueError
+
+        self.consumer.consume(ConsumeParams(on_message_callback),
+                              queue_params=QueueParams("queue"))
+        frame_mock = Mock()
+        frame_mock.method.consumer_tag = "123"
+        self.consumer.on_consume_ok(frame_mock,
+                                    queue_params=QueueParams("queue"))
+        deliver_mock = Mock()
+        deliver_mock.consumer_tag = "123"
+
+        # Run test, assertion is that no exception is uncaught
+        self.consumer.on_msg(Mock(), deliver_mock, Mock(), b"body")
 
     def test_consume_neither_queue_nor_exchange_provided(self):
         """
