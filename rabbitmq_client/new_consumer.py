@@ -363,7 +363,7 @@ class RMQConsumer(RMQConnection):
                                  consume.exchange_params,
                                  consume.routing_key)
 
-    def on_close(self):
+    def on_close(self, permanent=False):
         """
         Connection hook, called when the channel or connection is closed.
 
@@ -371,8 +371,13 @@ class RMQConsumer(RMQConnection):
         This is NOT reported as an error because users are expected to
         configure their exchanges and queues accordingly to avoid losing data
         they cannot live without.
+
+        :param permanent: bool
         """
-        LOGGER.info("consumer connection closed")
+        if permanent:
+            LOGGER.critical("consumer connection permanently closed")
+        else:
+            LOGGER.info("consumer connection closed")
 
         self._ready = False
 

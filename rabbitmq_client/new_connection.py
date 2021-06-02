@@ -56,7 +56,7 @@ class RMQConnection(ABC):
         pass
 
     @abstractmethod
-    def on_close(self):
+    def on_close(self, permanent=False):
         """
         Implementers can handle what should happen when the RMQConnection is
         suddenly closed. An on_close call will normally be followed by an
@@ -64,6 +64,8 @@ class RMQConnection(ABC):
         permanently down. It is possible that the RMQConnection will signal
         multiple on_close calls for a single connection failure, therefore the
         implementation of on_close must be idempotent.
+
+        :param permanent: bool
         """
         pass
 
@@ -315,10 +317,13 @@ class RMQConnection(ABC):
         :param _channel: pika.channel.Channel
         :param reason: pika.exceptions.?
         """
-        self.on_close()  # Signal subclass that connection is down.
+        permanent = False
 
-        LOGGER.warning(f"channel closed: {reason}")
-        LOGGER.warning(f"{type(reason)}")
+        try:
+            # Reply code 406 = PRECONDITION FAILED
+            permanent = True if reason.reply_code == 406 else False
+        except AttributeError:  # Not all reasons have a reply code
+            pass
 
-        # TODO what info to send implementer when going down permanently
-        #  like this?
+        # Signal subclass that connection is down.
+        self.on_close(permanent=permanent)
