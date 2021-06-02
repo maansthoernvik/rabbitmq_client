@@ -54,7 +54,7 @@ class TestConnectionBase(unittest.TestCase):
     def setUp(self) -> None:
         self.conn_imp = ConnectionImplementer()
 
-    @patch("rabbitmq_client.new_connection.SelectConnection")
+    @patch("rabbitmq_client.connection.SelectConnection")
     def test_successful_start(self, _select_connection):
         """
         Verify successful connection and channel establishment.
@@ -80,7 +80,7 @@ class TestConnectionBase(unittest.TestCase):
         )
         self.conn_imp.on_ready.assert_called()
 
-    @patch("rabbitmq_client.new_connection.SelectConnection")
+    @patch("rabbitmq_client.connection.SelectConnection")
     def test_unsuccessful_start(self, _select_connection):
         """
         Verify unsuccessful connection establishment.
@@ -95,7 +95,7 @@ class TestConnectionBase(unittest.TestCase):
         # Assertions
         self.conn_imp._reconnect.assert_called()
 
-    @patch("rabbitmq_client.new_connection.SelectConnection")
+    @patch("rabbitmq_client.connection.SelectConnection")
     def test_connection_closed_by_broker(self, _select_connection):
         """
         Verify connection closed by broker.
@@ -117,7 +117,7 @@ class TestConnectionBase(unittest.TestCase):
         self.conn_imp._connection.ioloop.stop.assert_called()
         self.conn_imp._reconnect.assert_called()
 
-    @patch("rabbitmq_client.new_connection.SelectConnection")
+    @patch("rabbitmq_client.connection.SelectConnection")
     def test_connection_closed_stream_lost(self, _select_connection):
         """
         Verify connection closed due to StreamLostError.
@@ -139,7 +139,7 @@ class TestConnectionBase(unittest.TestCase):
         self.conn_imp._connection.ioloop.stop.assert_called()
         self.conn_imp._reconnect.assert_called()
 
-    @patch("rabbitmq_client.new_connection.SelectConnection")
+    @patch("rabbitmq_client.connection.SelectConnection")
     def test_stop_connection(self, _select_connection):
         """
         Verify connection stop.
@@ -178,8 +178,8 @@ class TestConnectionBase(unittest.TestCase):
         # Assertions
         self.assertTrue(self.conn_imp._closing)
 
-    @patch("rabbitmq_client.new_connection.SelectConnection")
-    @patch("rabbitmq_client.new_connection.Thread", new=NotAThread)
+    @patch("rabbitmq_client.connection.SelectConnection")
+    @patch("rabbitmq_client.connection.Thread", new=NotAThread)
     def test_restart_connection(self, _select_connection):
         """
         Verify connection restart.
@@ -219,7 +219,7 @@ class TestConnectionBase(unittest.TestCase):
         self.conn_imp._channel.add_on_close_callback.assert_called()
         self.conn_imp.on_ready.assert_called()
 
-    @patch("rabbitmq_client.new_connection.Thread")
+    @patch("rabbitmq_client.connection.Thread")
     def test_reconnect_first_attempt(self, thread):
         """
         Verify first reconnect.
@@ -234,7 +234,7 @@ class TestConnectionBase(unittest.TestCase):
         self.conn_imp._connection_thread.start.assert_called()
         self.assertEqual(self.conn_imp._reconnect_attempts, 1)
 
-    @patch("rabbitmq_client.new_connection.Timer")
+    @patch("rabbitmq_client.connection.Timer")
     def test_reconnect_attempt_less_than_9(self, timer):
         """
         Verify second to ninth reconnect attempts.
@@ -251,7 +251,7 @@ class TestConnectionBase(unittest.TestCase):
         )
         self.assertEqual(self.conn_imp._reconnect_attempts, 2)
 
-    @patch("rabbitmq_client.new_connection.Timer")
+    @patch("rabbitmq_client.connection.Timer")
     def test_reconnect_attempt_9_or_more(self, timer):
         """
         Verify second to ninth reconnect attempts.
@@ -281,7 +281,7 @@ class TestConnectionBase(unittest.TestCase):
         # Assertions
         self.conn_imp.on_close.assert_called()
 
-    @patch("rabbitmq_client.new_connection.SelectConnection")
+    @patch("rabbitmq_client.connection.SelectConnection")
     def test_stop_failed_start_connection(self, _select_connection):
         """
         Verify stopping a connection that was never successfully started.
@@ -323,7 +323,7 @@ class TestConnectionDeclarations(unittest.TestCase):
     lead to 'basic_consume' being issued.
     """
 
-    @patch("rabbitmq_client.new_connection.SelectConnection")
+    @patch("rabbitmq_client.connection.SelectConnection")
     def setUp(self, _select_connection) -> None:
         """
         Set up connection to be in a started state, where both connection and

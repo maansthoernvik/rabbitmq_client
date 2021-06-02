@@ -1,2 +1,0 @@
-class CallbackError(Exception):
-    pass

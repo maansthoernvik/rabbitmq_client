@@ -9,7 +9,7 @@ from rabbitmq_client import (
     ConsumeOK,
     RMQConsumer
 )
-from rabbitmq_client.new_consumer import _gen_consume_key
+from rabbitmq_client.consumer import _gen_consume_key
 
 
 class TestConsumeKeyGeneration(unittest.TestCase):
@@ -66,7 +66,7 @@ class TestConsumer(unittest.TestCase):
     used as advertised and in different combinations.
     """
 
-    @patch("rabbitmq_client.new_consumer.RMQConnection.start")
+    @patch("rabbitmq_client.consumer.RMQConnection.start")
     def setUp(self, _connection_start) -> None:
         """Setup to run before each test case."""
         self.consumer = RMQConsumer()
@@ -368,7 +368,7 @@ class TestConsumer(unittest.TestCase):
         # Run test + assertions
         self.assertNotEqual(self.consumer._consumes.get(consumer_tag, None),
                             None)  # Entry created
-        self.consumer.on_close()
+        self.consumer.on_close(permanent=True)
         self.assertEqual(self.consumer._consumes.get(consumer_tag, None),
                          None)  # Now it should be gone
 
