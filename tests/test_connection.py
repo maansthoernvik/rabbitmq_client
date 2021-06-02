@@ -407,7 +407,7 @@ class TestConnectionDeclarations(unittest.TestCase):
 
     def test_consume_from_queue(self):
         """
-        Verify consuming from a queue.
+        Verify consuming from a queue with the on_message_callback_override.
         """
         # Prep
         def consume_on_msg(): ...
@@ -418,7 +418,7 @@ class TestConnectionDeclarations(unittest.TestCase):
         # Test
         self.conn_imp.consume_from_queue(
             consume_params,
-            consumer_on_msg,
+            on_message_callback_override=consumer_on_msg,
             callback=on_consume_ok
         )
 
@@ -426,6 +426,33 @@ class TestConnectionDeclarations(unittest.TestCase):
         self.conn_imp._channel.basic_consume.assert_called_with(
             consume_params.queue,
             consumer_on_msg,
+            auto_ack=consume_params.auto_ack,
+            exclusive=consume_params.exclusive,
+            consumer_tag=consume_params.consumer_tag,
+            arguments=consume_params.arguments,
+            callback=on_consume_ok
+        )
+
+    def test_consume_from_queue_wo_override(self):
+        """
+        Verify consuming from a queue without the callback override.
+        """
+
+        # Prep
+        def consume_on_msg(): ...
+        consume_params = ConsumeParams(consume_on_msg, queue="queue")
+        def on_consume_ok(): ...
+
+        # Test
+        self.conn_imp.consume_from_queue(
+            consume_params,
+            callback=on_consume_ok
+        )
+
+        # Assert
+        self.conn_imp._channel.basic_consume.assert_called_with(
+            consume_params.queue,
+            consume_params.on_message_callback,
             auto_ack=consume_params.auto_ack,
             exclusive=consume_params.exclusive,
             consumer_tag=consume_params.consumer_tag,

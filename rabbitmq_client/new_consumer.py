@@ -243,7 +243,9 @@ class RMQConsumer(RMQConnection):
             cb = functools.partial(self.on_consume_ok,
                                    queue_params=queue_params)
 
-            self.consume_from_queue(consume_params, self.on_msg, callback=cb)
+            self.consume_from_queue(consume_params,
+                                    on_message_callback_override=self.on_msg,
+                                    callback=cb)
 
     def on_exchange_declared(self,
                              frame,
@@ -290,7 +292,9 @@ class RMQConsumer(RMQConnection):
                                exchange=exchange,
                                routing_key=routing_key)
 
-        self.consume_from_queue(consume_params, self.on_msg, callback=cb)
+        self.consume_from_queue(consume_params,
+                                on_message_callback_override=self.on_msg,
+                                callback=cb)
 
     def on_consume_ok(self,
                       frame,

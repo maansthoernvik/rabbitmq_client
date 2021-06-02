@@ -11,12 +11,11 @@ from pika.exceptions import (
     ConnectionWrongStateError
 )
 
-
 LOGGER = logging.getLogger(__name__)
 
 RECONNECT_REASONS = (
     ConnectionClosedByBroker,  # Restarts/graceful shutdowns
-    StreamLostError            # Ungraceful shutdown
+    StreamLostError  # Ungraceful shutdown
 )
 
 
@@ -172,16 +171,17 @@ class RMQConnection(ABC):
 
     def consume_from_queue(self,
                            consume_params,
-                           on_message_callback,
+                           on_message_callback_override=None,
                            callback=None):
         """
         :param consume_params: rabbitmq_client.ConsumeParams
-        :param on_message_callback: callable
+        :param on_message_callback_override: callable
         :param callback: callable
         """
         self._channel.basic_consume(
             consume_params.queue,
-            on_message_callback,
+            (on_message_callback_override if on_message_callback_override
+             else consume_params.on_message_callback),
             auto_ack=consume_params.auto_ack,
             exclusive=consume_params.exclusive,
             consumer_tag=consume_params.consumer_tag,

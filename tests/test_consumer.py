@@ -191,7 +191,9 @@ class TestConsumer(unittest.TestCase):
 
         # Assertions
         self.consumer.consume_from_queue.assert_called_with(
-            consume_params, self.consumer.on_msg, callback=ANY)
+            consume_params,
+            on_message_callback_override=self.consumer.on_msg,
+            callback=ANY)
 
     def test_on_queue_declared_exchange(self):
         """
@@ -262,7 +264,9 @@ class TestConsumer(unittest.TestCase):
 
         # Assertions
         self.consumer.consume_from_queue.assert_called_with(
-            consume_params, self.consumer.on_msg, callback=ANY
+            consume_params,
+            on_message_callback_override=self.consumer.on_msg,
+            callback=ANY
         )
 
     def test_on_consume_ok(self):
