@@ -1,6 +1,6 @@
 import unittest
 
-from unittest.mock import Mock, patch, ANY
+from unittest.mock import Mock, patch, ANY, call
 
 from rabbitmq_client import (
     RMQProducer,
@@ -10,6 +10,7 @@ from rabbitmq_client import (
 )
 
 
+# noinspection DuplicatedCode
 class TestProducer(unittest.TestCase):
     """
     Test the RMQProducer implementation, which implements the RMQConnection
@@ -172,4 +173,32 @@ class TestProducer(unittest.TestCase):
             exchange=frame_mock.method.exchange,
             routing_key="",
             publish_params=publish_params
+        )
+
+    def test_publish_is_delayed_until_producer_connection_ready(self):
+        """
+        Verify that the producer buffers messages that are to be sent when the
+        producer connection is not in a ready state, and that the buffered
+        messages are sent upon the producer becoming ready.
+        """
+        # Prep
+        exchange_params = ExchangeParams("exchange")
+        frame_mock = Mock()
+        frame_mock.method.exchange = "exchange"
+        frame_mock.method.queue = "queue"
+        queue_params = QueueParams("queue")
+
+        # Run test + assertions
+        self.producer.on_close()
+        self.producer.publish(b"body", exchange_params=exchange_params)
+        self.producer.publish(b"body", queue_params=queue_params)
+
+        self.assertEqual(2, len(self.producer._buffered_messages))
+
+        self.producer.on_ready()
+        self.producer.declare_exchange.assert_called_with(
+            exchange_params, callback=ANY
+        )
+        self.producer.declare_queue.assert_called_with(
+            queue_params, callback=ANY
         )

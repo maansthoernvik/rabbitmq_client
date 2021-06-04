@@ -7,6 +7,28 @@ from rabbitmq_client.connection import RMQConnection
 LOGGER = logging.getLogger(__name__)
 
 
+class RMQPublish:
+
+    def __init__(self,
+                 body,
+                 exchange_params=None,
+                 routing_key="",
+                 queue_params=None,
+                 publish_params=None):
+        """
+        :param body: bytes
+        :param exchange_params: rabbitmq_client.ExchangeParams
+        :param routing_key: str
+        :param queue_params: rabbitmq_client.QueueParams
+        :param publish_params: rabbitmq_client.PublishParams
+        """
+        self.body = body,
+        self.exchange_params = exchange_params
+        self.routing_key = routing_key
+        self.queue_params = queue_params
+        self.publish_params = publish_params
+
+
 class RMQProducer(RMQConnection):
     """
     Generic producer implementation using the RMQConnection base class to ease
@@ -20,6 +42,9 @@ class RMQProducer(RMQConnection):
         super().__init__(connection_parameters=connection_parameters)
 
         self._ready = False
+
+        self._confirmed_deliveries = False
+        self._buffered_messages = list()
 
     @property
     def ready(self):
@@ -101,6 +126,15 @@ class RMQProducer(RMQConnection):
                                  queue_params,
                                  publish_params)
 
+        else:
+            self._buffered_messages.append(RMQPublish(
+                body,
+                exchange_params=exchange_params,
+                routing_key=routing_key,
+                queue_params=queue_params,
+                publish_params=publish_params
+            ))
+
     def _handle_publish(self,
                         body,
                         exchange_params,
@@ -170,6 +204,15 @@ class RMQProducer(RMQConnection):
         LOGGER.info("producer connection ready")
 
         self._ready = True
+
+        for buffered_message in self._buffered_messages:
+            self._handle_publish(buffered_message.body,
+                                 buffered_message.exchange_params,
+                                 buffered_message.routing_key,
+                                 buffered_message.queue_params,
+                                 buffered_message.publish_params)
+
+        self._buffered_messages = list()
 
     def on_close(self, permanent=False):
         """
