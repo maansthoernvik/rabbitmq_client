@@ -48,8 +48,6 @@ class TestProducer(unittest.TestCase):
         """Verify possibility to publish to an exchange."""
         # Prep
         exchange_params = ExchangeParams("exchange")
-        frame_mock = Mock()
-        frame_mock.method.exchange = "exchange"
 
         # Run test + assertions
         self.producer.publish(b"body", exchange_params=exchange_params)
@@ -58,7 +56,8 @@ class TestProducer(unittest.TestCase):
         )
 
         self.producer.on_exchange_declared(b"body",
-                                           frame_mock,
+                                           exchange_params,
+                                           None,
                                            routing_key="",
                                            publish_params=None)
         self.producer.basic_publish.assert_called_with(
@@ -122,8 +121,6 @@ class TestProducer(unittest.TestCase):
         # Prep
         exchange_params = ExchangeParams("exchange")
         routing_key = "routing_key"
-        frame_mock = Mock()
-        frame_mock.method.exchange = "exchange"
 
         # Run test + assertions
         self.producer.publish(b"body",
@@ -134,12 +131,13 @@ class TestProducer(unittest.TestCase):
         )
 
         self.producer.on_exchange_declared(b"body",
-                                           frame_mock,
+                                           exchange_params,
+                                           None,
                                            routing_key=routing_key,
                                            publish_params=None)
         self.producer.basic_publish.assert_called_with(
             b"body",
-            exchange=frame_mock.method.exchange,
+            exchange=exchange_params.exchange,
             routing_key=routing_key,
             publish_params=None
         )
@@ -152,8 +150,6 @@ class TestProducer(unittest.TestCase):
         exchange_params = ExchangeParams("exchange")
         publish_params = PublishParams()
         routing_key = "routing_key"
-        frame_mock = Mock()
-        frame_mock.method.exchange = "exchange"
 
         # Run test + assertions
         self.producer.publish(b"body",
@@ -165,12 +161,13 @@ class TestProducer(unittest.TestCase):
         )
 
         self.producer.on_exchange_declared(b"body",
-                                           frame_mock,
+                                           exchange_params,
+                                           None,
                                            routing_key="",
                                            publish_params=publish_params)
         self.producer.basic_publish.assert_called_with(
             b"body",
-            exchange=frame_mock.method.exchange,
+            exchange=exchange_params.exchange,
             routing_key="",
             publish_params=publish_params
         )
@@ -184,7 +181,6 @@ class TestProducer(unittest.TestCase):
         # Prep
         exchange_params = ExchangeParams("exchange")
         frame_mock = Mock()
-        frame_mock.method.exchange = "exchange"
         frame_mock.method.queue = "queue"
         queue_params = QueueParams("queue")
 

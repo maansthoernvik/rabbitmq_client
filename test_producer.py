@@ -1,11 +1,11 @@
 import signal
 import logging
 import threading
-import time
-
 import sys
 
-from rabbitmq_client import RMQProducer, QueueParams
+from pika.exchange_type import ExchangeType
+
+from rabbitmq_client import RMQProducer, QueueParams, ExchangeParams
 
 
 logger = logging.getLogger("rabbitmq_client")
@@ -26,7 +26,16 @@ def stop(*args):
 
 signal.signal(signal.SIGINT, stop)
 
-time.sleep(0.5)
-producer.publish(b"body", queue_params=QueueParams("queue"))
+producer.publish(b"queue publish 1", queue_params=QueueParams("queue"))
+producer.publish(b"queue publish 2", queue_params=QueueParams("queue"))
+producer.publish(b"queue publish 3", queue_params=QueueParams("queue"))
+producer.publish(b"exchange publish 1",
+                 exchange_params=ExchangeParams("direct"),
+                 routing_key="rkey")
+producer.publish(
+    b"exchange publish 2",
+    exchange_params=ExchangeParams("fanout",
+                                   exchange_type=ExchangeType.fanout))
+
 
 threading.Event().wait()

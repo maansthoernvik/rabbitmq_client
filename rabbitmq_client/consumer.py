@@ -232,9 +232,9 @@ class RMQConsumer(RMQConnection):
 
         if exchange_params is not None:
             cb = functools.partial(self.on_exchange_declared,
+                                   exchange_params,
                                    consume_params=consume_params,
                                    queue_params=queue_params,
-                                   exchange_params=exchange_params,
                                    routing_key=routing_key)
 
             self.declare_exchange(exchange_params, callback=cb)
@@ -248,44 +248,46 @@ class RMQConsumer(RMQConnection):
                                callback=cb)
 
     def on_exchange_declared(self,
-                             frame,
+                             exchange_params,
+                             _frame,
                              consume_params=None,
                              queue_params=None,
                              routing_key=None):
         """
-        :param frame: pika.frame.Method
+        :param exchange_params: rabbitmq_client.ExchangeParams
+        :param _frame: pika.frame.Method
         :param consume_params: rabbitmq_client.ConsumeParams
         :param queue_params: rabbitmq_client.QueueParams
         :param routing_key: str
         """
-        LOGGER.info(f"declared exchange: {frame.method.exchange}")
+        LOGGER.info(f"declared exchange: {exchange_params.exchange}")
 
         cb = functools.partial(self.on_queue_bound,
                                consume_params=consume_params,
                                queue_params=queue_params,
-                               exchange=frame.method.exchange,
+                               exchange=exchange_params.exchange,
                                routing_key=routing_key)
 
         self.bind_queue(QueueBindParams(consume_params.queue,
-                                        frame.method.exchange,
+                                        exchange_params.exchange,
                                         routing_key=routing_key),
                         callback=cb)
 
     def on_queue_bound(self,
-                       frame,
+                       _frame,
                        consume_params=None,
                        queue_params=None,
                        exchange=None,
                        routing_key=None):
         """
-        :param frame: pika.frame.Method
+        :param _frame: pika.frame.Method
         :param consume_params: rabbitmq_client.ConsumeParams
         :param queue_params: rabbitmq_client.QueueParams
         :param exchange: str
         :param routing_key: str
         """
         LOGGER.info(f"queue {consume_params.queue} bound to exchange "
-                    f"{exchange}, frame={frame}")
+                    f"{exchange}")
 
         cb = functools.partial(self.on_consume_ok,
                                queue_params=queue_params,

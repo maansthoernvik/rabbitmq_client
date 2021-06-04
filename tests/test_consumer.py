@@ -241,12 +241,13 @@ class TestConsumer(unittest.TestCase):
         """
         # Prep
         self.consumer.bind_queue = Mock()
-        frame = Mock()
+        exchange_params = ExchangeParams("exchange")
         consume_params = ConsumeParams(lambda _: ...)
         queue_params = QueueParams("queue")
 
         # Run test
-        self.consumer.on_exchange_declared(frame,
+        self.consumer.on_exchange_declared(exchange_params,
+                                           None,
                                            consume_params=consume_params,
                                            queue_params=queue_params)
 
@@ -257,7 +258,7 @@ class TestConsumer(unittest.TestCase):
             queue_bind_params, callback=ANY
         )
         self.assertEqual(queue_bind_params.queue, consume_params.queue)
-        self.assertEqual(queue_bind_params.exchange, frame.method.exchange)
+        self.assertEqual(queue_bind_params.exchange, exchange_params.exchange)
         self.assertEqual(queue_bind_params.routing_key, None)
 
     def test_on_queue_bound(self):

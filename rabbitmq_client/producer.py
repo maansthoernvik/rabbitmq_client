@@ -22,7 +22,7 @@ class RMQPublish:
         :param queue_params: rabbitmq_client.QueueParams
         :param publish_params: rabbitmq_client.PublishParams
         """
-        self.body = body,
+        self.body = body
         self.exchange_params = exchange_params
         self.routing_key = routing_key
         self.queue_params = queue_params
@@ -127,13 +127,13 @@ class RMQProducer(RMQConnection):
                                  publish_params)
 
         else:
-            self._buffered_messages.append(RMQPublish(
-                body,
-                exchange_params=exchange_params,
-                routing_key=routing_key,
-                queue_params=queue_params,
-                publish_params=publish_params
-            ))
+            self._buffered_messages.append(
+                RMQPublish(body,
+                           exchange_params=exchange_params,
+                           routing_key=routing_key,
+                           queue_params=queue_params,
+                           publish_params=publish_params)
+            )
 
     def _handle_publish(self,
                         body,
@@ -158,6 +158,7 @@ class RMQProducer(RMQConnection):
         else:
             cb = functools.partial(self.on_exchange_declared,
                                    body,
+                                   exchange_params,
                                    routing_key=routing_key,
                                    publish_params=publish_params)
 
@@ -180,19 +181,21 @@ class RMQProducer(RMQConnection):
 
     def on_exchange_declared(self,
                              body,
-                             frame,
+                             exchange_params,
+                             _frame,
                              routing_key="",
                              publish_params=None):
         """
         :param body: bytes
-        :param frame: pika.frame.Method
+        :param exchange_params: rabbitmq_client.ExchangeParams
+        :param _frame: pika.frame.Method
         :param routing_key: str
         :param publish_params: rabbitmq_client.PublishParams
         """
-        LOGGER.info(f"declared exchange: {frame.method.exchange}")
+        LOGGER.info(f"declared exchange: {exchange_params.exchange}")
 
         self.basic_publish(body,
-                           exchange=frame.method.exchange,
+                           exchange=exchange_params.exchange,
                            routing_key=routing_key,
                            publish_params=publish_params)
 

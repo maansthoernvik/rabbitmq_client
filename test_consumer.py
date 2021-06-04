@@ -1,11 +1,12 @@
 import signal
 import logging
 import threading
-
 import sys
 
+from pika.exchange_type import ExchangeType
+
 from rabbitmq_client import RMQConsumer, ConsumeOK
-from rabbitmq_client import ConsumeParams, QueueParams
+from rabbitmq_client import ConsumeParams, QueueParams, ExchangeParams
 
 
 logger = logging.getLogger("rabbitmq_client")
@@ -37,6 +38,16 @@ def on_msg(message):
 consumer.consume(
     ConsumeParams(on_msg),
     queue_params=QueueParams("queue")
+)
+consumer.consume(
+    ConsumeParams(on_msg),
+    exchange_params=ExchangeParams("direct"),
+    routing_key="rkey"
+)
+consumer.consume(
+    ConsumeParams(on_msg),
+    exchange_params=ExchangeParams("fanout",
+                                   exchange_type=ExchangeType.fanout),
 )
 
 threading.Event().wait()
