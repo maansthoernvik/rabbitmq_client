@@ -58,6 +58,7 @@ jobs:
       run: |
         coverage run --source rabbitmq_client -m unittest \
           tests.test_connection \
-          tests.test_consumer -f
+          tests.test_consumer \
+          tests.test_producer -f
         coverage report -m --fail-under 96
     # TODO: Add integration tests
