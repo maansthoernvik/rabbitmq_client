@@ -1,6 +1,6 @@
 import unittest
 
-from unittest.mock import Mock, patch, ANY, call
+from unittest.mock import Mock, patch, ANY
 
 from rabbitmq_client import (
     RMQProducer,
