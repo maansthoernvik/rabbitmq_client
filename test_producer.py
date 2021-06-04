@@ -5,7 +5,7 @@ import time
 
 import sys
 
-from rabbitmq_client import RMQConsumer
+from rabbitmq_client import RMQProducer, QueueParams
 
 
 logger = logging.getLogger("rabbitmq_client")
@@ -15,7 +15,7 @@ handler.setLevel(logging.INFO)
 logger.addHandler(handler)
 
 
-producer = RMQConsumer()
+producer = RMQProducer()
 producer.start()
 
 
@@ -26,7 +26,7 @@ def stop(*args):
 
 signal.signal(signal.SIGINT, stop)
 
-time.sleep(1)
-producer._channel.basic_publish(exchange="", routing_key="queue", body=b"poo!")
+time.sleep(0.5)
+producer.publish(b"body", queue_params=QueueParams("queue"))
 
 threading.Event().wait()

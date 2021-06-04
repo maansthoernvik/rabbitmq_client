@@ -1,6 +1,6 @@
 import unittest
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, ANY
 
 from pika.exceptions import (
     ConnectionClosedByBroker,
@@ -13,6 +13,8 @@ from rabbitmq_client import (
     ExchangeParams,
     QueueBindParams,
     ConsumeParams,
+    DEFAULT_EXCHANGE,
+    PublishParams
 )
 from tests.defs import NotAThread
 
@@ -281,6 +283,23 @@ class TestConnectionBase(unittest.TestCase):
         # Assertions
         self.conn_imp.on_close.assert_called()
 
+    def test_channel_closed_permanently(self):
+        """
+        Verify channel closed permanently.
+        """
+        # Setup
+        self.conn_imp.on_close = Mock()
+        self.conn_imp.stop = Mock()
+        reason_mock = Mock()
+        reason_mock.reply_code = 406  # PRECONDITION FAILED
+
+        # Run test
+        self.conn_imp.on_channel_closed(None, reason_mock)
+
+        # Assertions
+        self.conn_imp.on_close.assert_called_with(permanent=True)
+        self.conn_imp.stop.assert_called()
+
     @patch("rabbitmq_client.connection.SelectConnection")
     def test_stop_failed_start_connection(self, _select_connection):
         """
@@ -416,7 +435,7 @@ class TestConnectionDeclarations(unittest.TestCase):
         def on_consume_ok(): ...
 
         # Test
-        self.conn_imp.consume_from_queue(
+        self.conn_imp.basic_consume(
             consume_params,
             on_message_callback_override=consumer_on_msg,
             callback=on_consume_ok
@@ -444,7 +463,7 @@ class TestConnectionDeclarations(unittest.TestCase):
         def on_consume_ok(): ...
 
         # Test
-        self.conn_imp.consume_from_queue(
+        self.conn_imp.basic_consume(
             consume_params,
             callback=on_consume_ok
         )
@@ -458,4 +477,41 @@ class TestConnectionDeclarations(unittest.TestCase):
             consumer_tag=consume_params.consumer_tag,
             arguments=consume_params.arguments,
             callback=on_consume_ok
+        )
+
+    def test_basic_publish(self):
+        """Verify calls to basic_publish are handled as expected."""
+        # Test
+        self.conn_imp.basic_publish(b"body", routing_key="queue")
+
+        # Assert
+        self.conn_imp._channel.basic_publish.assert_called_with(
+            DEFAULT_EXCHANGE,
+            "queue",
+            b"body",
+            properties=None,
+            mandatory=False
+        )
+
+    def test_basic_publish_with_params(self):
+        """
+        Verify calls to basic_publish are handled as expected when including
+        publish parameters.
+        """
+        # Prep
+        publish_params = PublishParams(mandatory=True)
+
+        # Test
+        self.conn_imp.basic_publish(b"body",
+                                    exchange="logging",
+                                    routing_key="log.warning",
+                                    publish_params=publish_params)
+
+        # Assert
+        self.conn_imp._channel.basic_publish.assert_called_with(
+            "logging",
+            "log.warning",
+            b"body",
+            properties=None,
+            mandatory=True
         )

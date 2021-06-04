@@ -1,9 +1,8 @@
 import functools
 import logging
 
-from rabbitmq_client.defs import QueueParams, QueueBindParams, ConsumeOK
 from rabbitmq_client.connection import RMQConnection
-
+from rabbitmq_client.defs import DEFAULT_EXCHANGE
 
 LOGGER = logging.getLogger(__name__)
 
@@ -57,20 +56,111 @@ class RMQProducer(RMQConnection):
 
         super().stop()
 
-    def on_queue_declared(self, frame):
+    def publish(self,
+                body,
+                exchange_params=None,
+                routing_key="",
+                queue_params=None,
+                publish_params=None):
         """
+        Publish 'body' towards an exchange (optional routing key) or a queue.
+        You must provide EITHER exchange_params OR queue_params to handle
+        the declaration of the publish target, but not both.
+
+        The reasoning here is that a publisher may produce a message to an
+        exchange, but is not responsible for declaring the end-queue and its
+        binding. So, publish only declares the entity to which it produces its
+        message(s) but should not know all the details of an exchange-bound
+        queues properties. For work queues, the producer of course needs to
+        know declaration details since there is no intermediate step to publish
+        to.
+
+        :param body: bytes
+        :param exchange_params: rabbitmq_client.ExchangeParams
+        :param routing_key: str
+        :param queue_params: rabbitmq_client.QueueParams
+        :param publish_params: rabbitmq_client.PublishParams
+        """
+        LOGGER.info("publishing")
+        LOGGER.debug(f"exchange: {exchange_params}, routing_key: "
+                     f"{routing_key}, queue: {queue_params}")
+
+        if (
+                (not exchange_params and not queue_params) or
+                (exchange_params and queue_params)
+        ):
+            raise ValueError(
+                "You need to provide either a queue OR an exchange, else "
+                "there is nothing to publish to..."
+            )
+
+        if self.ready:
+            self._handle_publish(body,
+                                 exchange_params,
+                                 routing_key,
+                                 queue_params,
+                                 publish_params)
+
+    def _handle_publish(self,
+                        body,
+                        exchange_params,
+                        routing_key,
+                        queue_params,
+                        publish_params):
+        """
+        :param body: bytes
+        :param exchange_params: rabbitmq_client.ExchangeParams
+        :param routing_key: str
+        :param queue_params: rabbitmq_client.QueueParams
+        :param publish_params: rabbitmq_client.PublishParams
+        """
+        if queue_params:
+            cb = functools.partial(self.on_queue_declared,
+                                   body,
+                                   publish_params=publish_params)
+
+            self.declare_queue(queue_params, callback=cb)
+
+        else:
+            cb = functools.partial(self.on_exchange_declared,
+                                   body,
+                                   routing_key=routing_key,
+                                   publish_params=publish_params)
+
+            self.declare_exchange(exchange_params, callback=cb)
+
+    def on_queue_declared(self,
+                          body,
+                          frame,
+                          publish_params=None):
+        """
+        :param body: bytes
+        :param frame: pika.frame.Method
+        :param publish_params: rabbitmq_client.PublishParams
         """
         LOGGER.info(f"declared queue: {frame.method.queue}")
 
-    def on_exchange_declared(self, frame):
+        self.basic_publish(body,
+                           routing_key=frame.method.queue,
+                           publish_params=publish_params)
+
+    def on_exchange_declared(self,
+                             body,
+                             frame,
+                             routing_key="",
+                             publish_params=None):
         """
+        :param body: bytes
+        :param frame: pika.frame.Method
+        :param routing_key: str
+        :param publish_params: rabbitmq_client.PublishParams
         """
         LOGGER.info(f"declared exchange: {frame.method.exchange}")
 
-    def on_queue_bound(self, frame):
-        """
-        """
-        pass
+        self.basic_publish(body,
+                           exchange=frame.method.exchange,
+                           routing_key=routing_key,
+                           publish_params=publish_params)
 
     def on_ready(self):
         """
@@ -105,6 +195,7 @@ class RMQProducer(RMQConnection):
         """
         LOGGER.info("producer connection error")
 
+        raise NotImplementedError
         # Possible errors:
         # * channel died and will not recover
         # * callback for operation failed

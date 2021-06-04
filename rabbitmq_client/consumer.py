@@ -160,7 +160,7 @@ class RMQConsumer(RMQConnection):
         # 1. Checks
         if queue_params is None and exchange_params is None:
             raise ValueError(
-                "You need to provide either a queue, and exchange, or both, "
+                "You need to provide either a queue, an exchange, or both, "
                 "else there is nothing to consume from..."
             )
 
@@ -243,9 +243,9 @@ class RMQConsumer(RMQConnection):
             cb = functools.partial(self.on_consume_ok,
                                    queue_params=queue_params)
 
-            self.consume_from_queue(consume_params,
-                                    on_message_callback_override=self.on_msg,
-                                    callback=cb)
+            self.basic_consume(consume_params,
+                               on_message_callback_override=self.on_msg,
+                               callback=cb)
 
     def on_exchange_declared(self,
                              frame,
@@ -292,9 +292,9 @@ class RMQConsumer(RMQConnection):
                                exchange=exchange,
                                routing_key=routing_key)
 
-        self.consume_from_queue(consume_params,
-                                on_message_callback_override=self.on_msg,
-                                callback=cb)
+        self.basic_consume(consume_params,
+                           on_message_callback_override=self.on_msg,
+                           callback=cb)
 
     def on_consume_ok(self,
                       frame,
@@ -343,8 +343,8 @@ class RMQConsumer(RMQConnection):
         try:
             consume_params.on_message_callback(body)
         except Exception as e:
-            LOGGER.critical(f"the on_message_callback for queue: "
-                            f"{consume_params.queue} crashed with error: {e}")
+            LOGGER.warning(f"the on_message_callback for queue: "
+                           f"{consume_params.queue} crashed with error: {e}")
 
         channel.basic_ack(delivery_tag=basic_deliver.delivery_tag)
 
@@ -398,6 +398,7 @@ class RMQConsumer(RMQConnection):
         """
         LOGGER.info("consumer connection error")
 
+        raise NotImplementedError
         # Possible errors:
         # * channel died and will not recover
         # * callback for operation failed

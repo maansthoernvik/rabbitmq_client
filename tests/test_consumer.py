@@ -60,6 +60,7 @@ class TestConsumeKeyGeneration(unittest.TestCase):
         )
 
 
+# noinspection DuplicatedCode
 class TestConsumer(unittest.TestCase):
     """
     Test the new (2021) RMQConsumer class, verify its interface methods can be
@@ -76,7 +77,22 @@ class TestConsumer(unittest.TestCase):
         self.consumer.declare_queue = Mock()
         self.consumer.declare_exchange = Mock()
         self.consumer.bind_queue = Mock()
-        self.consumer.consume_from_queue = Mock()
+        self.consumer.basic_consume = Mock()
+
+    def test_consumer_readiness(self):
+        """Verify the consumer's ready property changes as expected."""
+        self.assertTrue(self.consumer.ready)
+        self.consumer.on_close()
+        self.assertFalse(self.consumer.ready)
+        self.consumer.on_ready()
+        self.assertTrue(self.consumer.ready)
+        self.consumer.on_close(permanent=True)
+        self.assertFalse(self.consumer.ready)
+
+    def test_consumer_error_handling(self):
+        """Verify on_error results in correct behavior..."""
+        with self.assertRaises(NotImplementedError):
+            self.consumer.on_error()
 
     def test_consume_exchange_only(self):
         """Verify possibility to consume from an exchange."""
@@ -179,7 +195,7 @@ class TestConsumer(unittest.TestCase):
         Verify that the correct action follows a successful queue declare.
         """
         # Prep
-        self.consumer.consume_from_queue = Mock()
+        self.consumer.basic_consume = Mock()
         frame = Mock()
         consume_params = ConsumeParams(lambda _: ...)
         queue_params = QueueParams("queue")
@@ -190,7 +206,7 @@ class TestConsumer(unittest.TestCase):
                                         queue_params=queue_params)
 
         # Assertions
-        self.consumer.consume_from_queue.assert_called_with(
+        self.consumer.basic_consume.assert_called_with(
             consume_params,
             on_message_callback_override=self.consumer.on_msg,
             callback=ANY)
@@ -250,7 +266,7 @@ class TestConsumer(unittest.TestCase):
         operation.
         """
         # Prep
-        self.consumer.consume_from_queue = Mock()
+        self.consumer.basic_consume = Mock()
         frame = Mock()
         consume_params = ConsumeParams(lambda _: ...)
         queue_params = QueueParams("queue")
@@ -263,7 +279,7 @@ class TestConsumer(unittest.TestCase):
                                      routing_key=None)
 
         # Assertions
-        self.consumer.consume_from_queue.assert_called_with(
+        self.consumer.basic_consume.assert_called_with(
             consume_params,
             on_message_callback_override=self.consumer.on_msg,
             callback=ANY

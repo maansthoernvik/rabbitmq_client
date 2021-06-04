@@ -11,6 +11,9 @@ from pika.exceptions import (
     ConnectionWrongStateError
 )
 
+from rabbitmq_client.defs import DEFAULT_EXCHANGE, PublishParams
+
+
 LOGGER = logging.getLogger(__name__)
 
 RECONNECT_REASONS = (
@@ -171,10 +174,10 @@ class RMQConnection(ABC):
             callback=callback
         )
 
-    def consume_from_queue(self,
-                           consume_params,
-                           on_message_callback_override=None,
-                           callback=None):
+    def basic_consume(self,
+                      consume_params,
+                      on_message_callback_override=None,
+                      callback=None):
         """
         :param consume_params: rabbitmq_client.ConsumeParams
         :param on_message_callback_override: callable
@@ -190,6 +193,24 @@ class RMQConnection(ABC):
             arguments=consume_params.arguments,
             callback=callback
         )
+
+    def basic_publish(self,
+                      body,
+                      exchange=DEFAULT_EXCHANGE,
+                      routing_key="",
+                      publish_params=None):
+        """
+        :param body: bytes
+        :param exchange: str
+        :param routing_key: str
+        :param publish_params: rabbitmq_client.PublishParams
+        """
+        if not publish_params:
+            publish_params = PublishParams()  # Create defaults
+
+        self._channel.basic_publish(exchange, routing_key, body,
+                                    properties=publish_params.properties,
+                                    mandatory=publish_params.mandatory)
 
     def _connect(self):
         """
@@ -317,6 +338,8 @@ class RMQConnection(ABC):
         :param _channel: pika.channel.Channel
         :param reason: pika.exceptions.?
         """
+        LOGGER.warning("channel closed")
+
         permanent = False
 
         try:
@@ -327,3 +350,8 @@ class RMQConnection(ABC):
 
         # Signal subclass that connection is down.
         self.on_close(permanent=permanent)
+
+        if permanent:
+            LOGGER.critical(f"connection stopping due to permanent channel "
+                            f"closure: {reason}")
+            self.stop()

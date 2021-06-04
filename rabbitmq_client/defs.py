@@ -1,6 +1,15 @@
 from pika.exchange_type import ExchangeType
 
 
+#
+# DEFS
+#
+DEFAULT_EXCHANGE = ""
+
+
+#
+# STRUCTS
+#
 class QueueParams:
 
     def __init__(self,
@@ -89,6 +98,23 @@ class ConsumeParams:
     @consumer_tag.setter
     def consumer_tag(self, new_value):
         self._consumer_tag = new_value
+
+
+class PublishParams:
+
+    def __init__(self,
+                 properties=None,
+                 mandatory=False):
+        """
+        # noqa 501
+        https://pika.readthedocs.io/en/stable/modules/channel.html#pika.channel.Channel.basic_publish
+
+        Since body, exchange, and routing key are mandatory parameters of
+        basic_publish, they are not included in this parameter object but
+        rather a part of the general publish interface of RMQProducer.
+        """
+        self.properties = properties
+        self.mandatory = mandatory
 
 
 class QueueBindParams:
