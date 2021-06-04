@@ -1,6 +1,6 @@
 import unittest
 
-from unittest.mock import Mock, patch, ANY
+from unittest.mock import Mock, patch
 
 from pika.exceptions import (
     ConnectionClosedByBroker,

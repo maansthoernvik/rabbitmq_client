@@ -2,7 +2,7 @@ import functools
 import logging
 
 from rabbitmq_client.connection import RMQConnection
-from rabbitmq_client.defs import DEFAULT_EXCHANGE
+
 
 LOGGER = logging.getLogger(__name__)
 
