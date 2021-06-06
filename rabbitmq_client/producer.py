@@ -1,8 +1,16 @@
 import functools
 import logging
+import uuid
+
+from threading import Lock
+
+from pika.spec import Basic
 
 from rabbitmq_client.connection import RMQConnection
-
+from rabbitmq_client.defs import (
+    ConfirmModeOK,
+    DeliveryError
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -14,19 +22,22 @@ class RMQPublish:
                  exchange_params=None,
                  routing_key="",
                  queue_params=None,
-                 publish_params=None):
+                 publish_params=None,
+                 publish_key=None):
         """
         :param body: bytes
         :param exchange_params: rabbitmq_client.ExchangeParams
         :param routing_key: str
         :param queue_params: rabbitmq_client.QueueParams
         :param publish_params: rabbitmq_client.PublishParams
+        :param publish_key: str
         """
         self.body = body
         self.exchange_params = exchange_params
         self.routing_key = routing_key
         self.queue_params = queue_params
         self.publish_params = publish_params
+        self.publish_key = publish_key
 
 
 class RMQProducer(RMQConnection):
@@ -43,8 +54,13 @@ class RMQProducer(RMQConnection):
 
         self._ready = False
 
-        self._confirmed_deliveries = False
         self._buffered_messages = list()
+
+        self._confirm_mode_active = False
+        self._confirm_delivery_callback = None
+        self._next_delivery_tag = 1
+        self._publish_lock = Lock()
+        self._unacked_publishes = dict()
 
     @property
     def ready(self):
@@ -100,11 +116,18 @@ class RMQProducer(RMQConnection):
         know declaration details since there is no intermediate step to publish
         to.
 
+        If confirm mode is activated, a key is returned which corresponds to
+        the message being published. Users can confirm that their publish has
+        been sent successfully by waiting for their key to be referred to in
+        a call to their confirm mode notify callback where the input parameter
+        == the generated publish key.
+
         :param body: bytes
         :param exchange_params: rabbitmq_client.ExchangeParams
         :param routing_key: str
         :param queue_params: rabbitmq_client.QueueParams
         :param publish_params: rabbitmq_client.PublishParams
+        :returns: str
         """
         LOGGER.info("publishing")
         LOGGER.debug(f"exchange: {exchange_params}, routing_key: "
@@ -119,12 +142,24 @@ class RMQProducer(RMQConnection):
                 "there is nothing to publish to..."
             )
 
-        if self.ready:
+        publish_key = None
+        if self._confirm_delivery_callback is not None:
+            publish_key = str(uuid.uuid4())
+
+        if (
+                self.ready and
+                (
+                    (self._confirm_delivery_callback is not None and
+                     self._confirm_mode_active) or
+                    self._confirm_delivery_callback is None
+                )
+        ):
             self._handle_publish(body,
                                  exchange_params,
                                  routing_key,
                                  queue_params,
-                                 publish_params)
+                                 publish_params,
+                                 publish_key)
 
         else:
             self._buffered_messages.append(
@@ -132,26 +167,43 @@ class RMQProducer(RMQConnection):
                            exchange_params=exchange_params,
                            routing_key=routing_key,
                            queue_params=queue_params,
-                           publish_params=publish_params)
+                           publish_params=publish_params,
+                           publish_key=publish_key)
             )
+
+        return publish_key
+
+    def activate_confirm_mode(self, notify_callback):
+        """
+        :param notify_callback: callable
+        """
+        if self.ready and self._confirm_delivery_callback is None:
+            LOGGER.info("activating confirm delivery mode")
+            self.confirm_delivery(self.on_delivery_confirmed,
+                                  callback=self.on_confirm_select_ok)
+
+        self._confirm_delivery_callback = notify_callback
 
     def _handle_publish(self,
                         body,
                         exchange_params,
                         routing_key,
                         queue_params,
-                        publish_params):
+                        publish_params,
+                        publish_key):
         """
         :param body: bytes
         :param exchange_params: rabbitmq_client.ExchangeParams
         :param routing_key: str
         :param queue_params: rabbitmq_client.QueueParams
         :param publish_params: rabbitmq_client.PublishParams
+        :param publish_key: str
         """
         if queue_params:
             cb = functools.partial(self.on_queue_declared,
                                    body,
-                                   publish_params=publish_params)
+                                   publish_params=publish_params,
+                                   publish_key=publish_key)
 
             self.declare_queue(queue_params, callback=cb)
 
@@ -160,44 +212,121 @@ class RMQProducer(RMQConnection):
                                    body,
                                    exchange_params,
                                    routing_key=routing_key,
-                                   publish_params=publish_params)
+                                   publish_params=publish_params,
+                                   publish_key=publish_key)
 
             self.declare_exchange(exchange_params, callback=cb)
 
     def on_queue_declared(self,
                           body,
                           frame,
-                          publish_params=None):
+                          publish_params=None,
+                          publish_key=None):
         """
         :param body: bytes
         :param frame: pika.frame.Method
         :param publish_params: rabbitmq_client.PublishParams
+        :param publish_key: str
         """
         LOGGER.info(f"declared queue: {frame.method.queue}")
 
-        self.basic_publish(body,
-                           routing_key=frame.method.queue,
-                           publish_params=publish_params)
+        self._finalize_publish(body,
+                               routing_key=frame.method.queue,
+                               publish_params=publish_params,
+                               publish_key=publish_key)
 
     def on_exchange_declared(self,
                              body,
                              exchange_params,
                              _frame,
                              routing_key="",
-                             publish_params=None):
+                             publish_params=None,
+                             publish_key=None):
         """
         :param body: bytes
         :param exchange_params: rabbitmq_client.ExchangeParams
         :param _frame: pika.frame.Method
         :param routing_key: str
         :param publish_params: rabbitmq_client.PublishParams
+        :param publish_key: str
         """
         LOGGER.info(f"declared exchange: {exchange_params.exchange}")
 
-        self.basic_publish(body,
-                           exchange=exchange_params.exchange,
-                           routing_key=routing_key,
-                           publish_params=publish_params)
+        self._finalize_publish(body,
+                               exchange=exchange_params.exchange,
+                               routing_key=routing_key,
+                               publish_params=publish_params,
+                               publish_key=publish_key)
+
+    def _finalize_publish(self,
+                          body,
+                          exchange=None,
+                          routing_key=None,
+                          publish_params=None,
+                          publish_key=None):
+        """
+        :param body: bytes
+        :param exchange: str
+        :param routing_key: str
+        :param publish_params: rabbitmq_client.PublishParams
+        :param publish_key: str
+        """
+        if publish_key is not None:
+            with self._publish_lock:
+                self._unacked_publishes[self._next_delivery_tag] = publish_key
+                self._next_delivery_tag += 1
+
+                self.basic_publish(body,
+                                   exchange=exchange,
+                                   routing_key=routing_key,
+                                   publish_params=publish_params)
+
+        else:
+            self.basic_publish(body,
+                               exchange=exchange,
+                               routing_key=routing_key,
+                               publish_params=publish_params)
+
+    def _empty_buffered_messages(self):
+        """
+        Sends all buffered messages.
+        """
+        for buffered_message in self._buffered_messages:
+            self._handle_publish(buffered_message.body,
+                                 buffered_message.exchange_params,
+                                 buffered_message.routing_key,
+                                 buffered_message.queue_params,
+                                 buffered_message.publish_params,
+                                 buffered_message.publish_key)
+
+        self._buffered_messages = list()
+
+    def on_confirm_select_ok(self, _frame):
+        """
+        :param _frame: pika.frame.Method
+        """
+        LOGGER.info("confirm select ok")
+        self._confirm_mode_active = True
+        self._confirm_delivery_callback(ConfirmModeOK())
+
+        self._empty_buffered_messages()
+
+    def on_delivery_confirmed(self, frame):
+        """
+        :param frame: pika.frame.Method
+        """
+        publish_key = self._unacked_publishes.pop(
+            frame.method.delivery_tag
+        )
+
+        if isinstance(frame.method, Basic.Ack):
+            self._confirm_delivery_callback(publish_key)
+
+        else:
+            LOGGER.error(f"broker nacked a publish: {frame}")
+            self._confirm_delivery_callback(
+                DeliveryError(publish_key)
+            )
 
     def on_ready(self):
         """
@@ -208,14 +337,12 @@ class RMQProducer(RMQConnection):
 
         self._ready = True
 
-        for buffered_message in self._buffered_messages:
-            self._handle_publish(buffered_message.body,
-                                 buffered_message.exchange_params,
-                                 buffered_message.routing_key,
-                                 buffered_message.queue_params,
-                                 buffered_message.publish_params)
+        if self._confirm_delivery_callback is not None:
+            self.confirm_delivery(self.on_delivery_confirmed,
+                                  callback=self.on_confirm_select_ok)
 
-        self._buffered_messages = list()
+        else:
+            self._empty_buffered_messages()
 
     def on_close(self, permanent=False):
         """
@@ -234,6 +361,10 @@ class RMQProducer(RMQConnection):
             LOGGER.info("producer connection closed")
 
         self._ready = False
+        self._confirm_mode_active = False
+        # Delivery tags are channel-specific, so connection going down means
+        # the tag is reset.
+        self._next_delivery_tag = 1
 
     def on_error(self):
         """

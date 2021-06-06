@@ -6,10 +6,12 @@ from rabbitmq_client.producer import RMQProducer  # noqa
 from rabbitmq_client.defs import (  # noqa
     QueueParams,
     ExchangeParams,
-    ConsumeParams,
     QueueBindParams,
-    ConsumeOK,
+    ConsumeParams,
     PublishParams,
+    ConsumeOK,
+    ConfirmModeOK,
+    DeliveryError,
     DEFAULT_EXCHANGE,
 )
 

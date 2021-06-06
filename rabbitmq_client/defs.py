@@ -141,3 +141,16 @@ class ConsumeOK:
         :param consumer_tag: str
         """
         self.consumer_tag = consumer_tag
+
+
+class ConfirmModeOK:
+    pass
+
+
+class DeliveryError:
+
+    def __init__(self, publish_key):
+        """
+        :param publish_key: int
+        """
+        self.publish_key = publish_key

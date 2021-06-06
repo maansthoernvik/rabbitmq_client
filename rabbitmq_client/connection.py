@@ -212,6 +212,16 @@ class RMQConnection(ABC):
                                     properties=publish_params.properties,
                                     mandatory=publish_params.mandatory)
 
+    def confirm_delivery(self, on_delivery_confirmed, callback=None):
+        """
+        :param on_delivery_confirmed: callable
+        :param callback: callable
+        """
+        LOGGER.info("activating confirm delivery mode")
+
+        self._channel.confirm_delivery(on_delivery_confirmed,
+                                       callback=callback)
+
     def _connect(self):
         """
         Assigns a new pika.SelectConnection to the connection and starts its

@@ -1,6 +1,8 @@
 import signal
 import logging
 import threading
+import time
+
 import sys
 
 from pika.exchange_type import ExchangeType
@@ -32,6 +34,21 @@ producer.publish(b"queue publish 3", queue_params=QueueParams("queue"))
 producer.publish(b"exchange publish 1",
                  exchange_params=ExchangeParams("direct"),
                  routing_key="rkey")
+producer.publish(
+    b"exchange publish 2",
+    exchange_params=ExchangeParams("fanout",
+                                   exchange_type=ExchangeType.fanout))
+
+time.sleep(0.3)
+producer.activate_confirm_mode(lambda x: print(x))
+producer.publish(
+    b"exchange publish 2",
+    exchange_params=ExchangeParams("fanout",
+                                   exchange_type=ExchangeType.fanout))
+producer.publish(
+    b"exchange publish 2",
+    exchange_params=ExchangeParams("fanout",
+                                   exchange_type=ExchangeType.fanout))
 producer.publish(
     b"exchange publish 2",
     exchange_params=ExchangeParams("fanout",
