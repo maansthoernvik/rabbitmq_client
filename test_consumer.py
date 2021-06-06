@@ -6,7 +6,7 @@ import sys
 from pika.exchange_type import ExchangeType
 
 from rabbitmq_client import RMQConsumer, ConsumeOK
-from rabbitmq_client import ConsumeParams, QueueParams, ExchangeParams
+from rabbitmq_client import ConsumeParams, ExchangeParams
 
 
 logger = logging.getLogger("rabbitmq_client")

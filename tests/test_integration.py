@@ -13,7 +13,7 @@ from rabbitmq_client import (
     ConsumeParams,
     QueueParams,
     ExchangeParams,
-    ConsumeOK
+    ConsumeOK, ConfirmModeOK
 )
 
 
@@ -30,7 +30,7 @@ def started(rmq_client, timeout=2.0):
 
 
 # noinspection DuplicatedCode
-class IntegrationTestConsumer(unittest.TestCase):
+class IntegrationTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.consumer = RMQConsumer()
@@ -229,6 +229,86 @@ class IntegrationTestConsumer(unittest.TestCase):
         event.wait(timeout=1.0)
         self.assertEqual(msg_received, b"body")
 
+    def test_confirm_mode(self):
+        """
+        Verify confirm mode pushes publish_keys to users on successful
+        delivery.
+        """
+        msg_received = None
+        event = threading.Event()
+
+        def on_confirm(confirm):
+            event.set()
+
+            nonlocal msg_received
+            msg_received = confirm
+
+        # Activate confirm mode
+        self.producer.activate_confirm_mode(on_confirm)
+
+        # Wait for ConfirmModeOK
+        event.wait(timeout=1.0)
+        self.assertTrue(isinstance(msg_received, ConfirmModeOK))
+
+        # Send a message and verify it is delivered OK
+        event.clear()
+        publish_key = self.producer.publish(
+            b"body",
+            exchange_params=ExchangeParams("exchange_direct"),
+        )
+
+        event.wait(timeout=1.0)
+        self.assertEqual(msg_received, publish_key)
+        self.assertEqual(len(self.producer._unacked_publishes.keys()), 0)
+
+    def test_buffer_publishes_with_confirm_mode_on(self):
+        """
+        Verify buffering publishes, with confirm mode on, and then starting the
+        producer results in a correct number of messages being sent
+        successfully, measured by counting and verifying the Basic.Acks
+        received from the broker.
+        """
+        producer = RMQProducer()
+        event = threading.Event()
+        key_dict = dict()
+
+        def on_confirm(confirm):
+            if not isinstance(confirm, ConfirmModeOK):
+                key_dict.pop(confirm)
+
+            if len(key_dict.keys()) == 0:
+                event.set()
+
+        # Activate confirm mode
+        producer.activate_confirm_mode(on_confirm)
+
+        # Buffer a few publishes
+        key_dict[
+            producer.publish(
+                b"body", exchange_params=ExchangeParams("exchange_direct"))
+        ] = False
+        key_dict[
+            producer.publish(
+                b"body", exchange_params=ExchangeParams("exchange_direct"))
+        ] = False
+        key_dict[
+            producer.publish(
+                b"body", exchange_params=ExchangeParams("exchange_direct"))
+        ] = False
+        self.assertEqual(len(producer._unacked_publishes.keys()), 0)
+        self.assertEqual(len(producer._buffered_messages), 3)
+
+        # Start the producer
+        producer.start()
+        self.assertTrue(started(producer))
+
+        # Await all confirms
+        event.wait(timeout=1.0)
+        self.assertEqual(len(producer._unacked_publishes.keys()), 0)
+
+        # Stop the extra producer
+        producer.stop()
+
     @classmethod
     def tearDownClass(cls) -> None:
         """
@@ -247,31 +327,3 @@ class IntegrationTestConsumer(unittest.TestCase):
         client._channel.queue_purge("queue")
 
         client.stop()
-
-
-class IntegrationTestProducer(unittest.TestCase):
-
-    def setUp(self) -> None:
-        self.producer = RMQProducer()
-        self.producer.start()
-        self.assertTrue(started(self.producer))
-
-        self.consumer = RMQConsumer()
-        self.consumer.start()
-        self.assertTrue(started(self.consumer))
-
-    def tearDown(self) -> None:
-        self.producer.stop()
-        self.consumer.stop()
-
-    def test_stop_producer(self):
-        """
-        Verify RMQProducer, when stopped, shuts down completely and releases
-        allocated resources.
-        """
-        # Run test
-        self.producer.stop()
-
-        thread_count = len(threading.enumerate())
-        # Only MainThread should still be running.
-        self.assertEqual(2, thread_count)
