@@ -11,6 +11,75 @@ By using this project, users should be able to get started with RabbitMQ in
 Python instantly, by simply instantiating and starting a `RMQConsumer` or 
 `RMQProducer` class.
 
+## Consumer
+
+``RMQConsumer`` extends the `RMQConnection` base class with only one extra 
+method: `consume`. Consume can be passed parameters for declaring queues and
+exchanges, as well as binding them together, and consume parameters, all of 
+which have corresponding kwargs in the pika library. The idea is not to 
+re-invent the wheel, but simply the process of declaring a queue -> declaring an
+exchange -> binding the exchange and queue together -> consuming from the queue.
+
+Here is an example:
+```python
+from rabbitmq_client import RMQConsumer, ConsumeParams, QueueParams
+
+
+def on_message(msg):
+    ...
+
+consumer = RMQConsumer()
+consumer.start()
+consumer.consume(ConsumeParams(on_message),
+                 queue_params=QueueParams("queue_name"))
+```
+
+The flow of declaring, binding, and consuming is quite 
+straightforward. The above example will declare a queue with the name 
+"queue_name" and consume from it.
+
+*NOTE!* Although the above may look synchronous, it is not. Start is 
+asynchronous 
+and any consume started while the consumer is not fully started will simply be
+delayed until it is. When a consume has been successfully started, the bound 
+callback will receive a ``ConsumeOK`` object containing the resulting 
+consumer tag.
+
+## Producer
+`RMQProducer` extends the `RMQConnection` base class with two additional 
+methods: `publish` and `activate_confirm_mode`. Publish is used, as it 
+sounds, to publish messages towards queues and/or exchanges. The confirm 
+mode activation method enabled confirm mode so that users can verify that 
+messages have been delivered successfully.
+
+```python
+from rabbitmq_client import RMQProducer, ExchangeParams
+
+
+def on_confirm(confirmation):
+    ...
+
+producer = RMQProducer()
+producer.start()
+producer.activate_confirm_mode(on_confirm)  # Or don't, depends on your needs
+
+producer.publish(b"body", 
+                 exchange_params=ExchangeParams("exchange_name"),
+                 routing_key="some.routing.key")
+```
+
+`activate_confirm_mode` isn't synchronous either, but you don't have to 
+worry about that. Calling `publish` after `activate_confirm_mode` will lead 
+to the publish not happening until confirm mode has been activated 
+successfully. The callback passed to `activate_confirm_mode` will also 
+receive a `ConfirmModeOK` once confirm mode is on. Any publish between 
+calling `activate_confirm_mode` and the producer receiving a 
+confirm_select_ok from RabbitMQ will be buffered and not issues until 
+confirm mode is on. When confirm mode is on, `publish` also returns a key that 
+clients can use to correlate successful delivered with calls to publish. 
+Once a `publish` call with key X is confirmed, the callback passed to 
+`activate_confirm_mode` will be called with X.
+
 ## Abstract connection helper
 
 The abstract `RMQConnection` class can be subclassed to get a head start in
@@ -58,6 +127,10 @@ on the fly.
 `stop` permanently closes an open connection and will have no effect on a
 closed connection. A connection for which `stop` has been called cannot be
 re-used. `on_close` is called once the connection is completely stopped.
+
+Aside from the connection-related methods, the `RMQConnection` also exposes
+interations with the `pika.Channel`, named similarily. See here for what is
+exposed: [Pika docs](https://pika.readthedocs.io/en/stable/modules/channel.html).
 
 ### Automatic reconnection
 
