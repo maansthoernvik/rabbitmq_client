@@ -241,10 +241,12 @@ class TestConfirmMode(unittest.TestCase):
             callback=self.producer.on_confirm_select_ok
         )
 
+        self.assertFalse(self.producer._confirm_mode_active)
         self.producer.on_confirm_select_ok(Mock())
 
         # Assert
         self.assertTrue(confirm_mode_started)
+        self.assertTrue(self.producer._confirm_mode_active)
 
     def test_confirm_mode_publish_key_returned_by_publish(self):
         """
@@ -353,7 +355,7 @@ class TestConfirmMode(unittest.TestCase):
 
     def test_confirm_mode_delays_buffer_until_confirm_mode_ok(self):
         """
-        Verify that if confirm mode has been activated, that buffered publishes
+        Verify that, if confirm mode has been activated, buffered publishes
         are not sent on 'on_ready', but rather 'on_confirm_select_ok'.
         """
         # Prep
