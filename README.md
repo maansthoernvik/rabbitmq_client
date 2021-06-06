@@ -1,103 +1,94 @@
-# RabbitMQ client based on pika
+# RabbitMQ client helpers based on pika
 [![PyPI version](https://badge.fury.io/py/rabbitmq-client.svg)](https://badge.fury.io/py/rabbitmq-client)
 [![Build](https://github.com/maansthoernvik/rabbitmq_client/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/maansthoernvik/rabbitmq_client/actions/workflows/build.yml)
 
-This repository offers a RabbitMQ client based on pika. Its purpose is to
-provide an extremely simple API with which to interact with RabbitMQ. The idea
-is to remove the need for deep knowledge of RabbitMQ in order to use it as a
-messaging service, allowing more people to leverage its power while avoiding
-having to invest an inordinate amount of time researching before getting
+This project provides helper classes for using RabbitMQ in Python. It is 
+based on `pika`, which is an awesome no-dependency client library for 
+RabbitMQ. Similarly, this project strives for zero dependencies (except for 
+dev dependencies).
+
+By using this project, users should be able to get started with RabbitMQ in 
+Python instantly, by simply instantiating and starting a `RMQConsumer` or 
+`RMQProducer` class.
+
+## Abstract connection helper
+
+The abstract `RMQConnection` class can be subclassed to get a head start in
+using the `pika` `SelectConnection` and `Channel` objects as it wraps them 
+and provides an easy-to-use interface as well as event hooks on important
+happenings.
+
+### RMQConnection lifecycle hooks
+
+Subclassing `RMQConnection` requires the implementer to override three methods:
+`on_ready`, `on_close`, and `on_error`. 
+
+`on_ready` is called when `RMQConnection` has established a connection and 
+opened a channel. 
+
+`on_close` is called when either the connection, or the channel closes for
+any reason. This means the implementer may receive two calls for one failed 
+connection, one for the channel and one for the connection itself. This 
+makes it important that `on_close` is made idempotent.   
+
+`on_error` is called when a recent action failed, such as an exchange 
+declaration failure. These hooks are meant to enable the implementer to react
+to the connection state and restore an operating state. The `RMQConnection` 
+abstract base class is used by the `rabbitmq_client` project to implement its
+`RMQConsumer` and `RMQProducer` classes.
+
+### RMQConnection interface methods
+
+In addition to the hooks that need to be implemented by implementing classes,
+`RMQConnection` provides three public methods that can be used to interact 
+with the connection object: `start`, `restart`, and `stop`.
+
+`start` initiates the connection, establishing a `pika.SelectConnection` and
+if that's successful, opening a `pika.Channel` for the opened connection. Once
+a channel has been opened, `RMQConnection` will issue a call to `on_ready`. 
+Subsequent calls to `start` have no effect if the connection has already been
 started.
 
-## Limitations
+`restart` closes the open connection and ensures that it is started again once
+is has been fully closed. `restart` is only meant to be used on successfully 
+established connections, it will have no effect on closed connections. 
+`restart` is meant to be used as a means to change `pika.ConnectionParameters`
+on the fly.
 
-For now, this client has been created for a specific purpose, and because of
-that it really only works well while interacting with other clients of this
-same repository. For example, the publish/subscribe functionality expects an
-exchange of type fanout with no additional settings. Should an exchange with
-the same name as what is being subscribed to already exist, the operation will
-fail as RabbitMQ spots this difference and throws an error. So, currently this
-client only works well/at all with other clients of the same type, i.e. other
-`rabbitmq_client` clients.
+`stop` permanently closes an open connection and will have no effect on a
+closed connection. A connection for which `stop` has been called cannot be
+re-used. `on_close` is called once the connection is completely stopped.
 
-It is the intention to generalize the applicability of this client in the
-future, but for now it is being engineered to support all use cases of these
-projects:
+### Automatic reconnection
 
-* https://github.com/megacorpincorporated/hint
-* https://github.com/megacorpincorporated/hume
+`RMQConnection` will re-establish lost connections, but not lost channels. 
+Reconnections will not be done for any reason though, among the reasons for 
+reconnecting are:
 
-## Supported types of messaging
+* pika.exceptions.ConnectionClosedByBroker
+* pika.exceptions.StreamLostError
 
-### Publish/subscribe
+These two exceptions cover the cases where the broker has been shut down, either
+expectedly or unexpectedly, or when the connection is lost for some other 
+reason.
 
-Allows for message distribution to whoever is currently listening on a given
-topic. The publish/subscribe feature does not support confirmed message
-delivery nor is it intended to, only listening services at the time of
-publishing will receive the published message.
+Again, if the channel is lost, but the connection remains intact, 
+`RMQConnection` will not recover the channel.
 
-### RPC
-
-Lets a service define a named RPC queue allowing other services to post
-messages expecting a reply from the RPC server. The solution leverages
-RabbitMQs direct reply-to functionality as described here: 
-https://www.rabbitmq.com/direct-reply-to.html. Clients need to provide
-a reply-to property in order for the RPC server to be able to reply.
-Implementation is based on the examples provided here: 
-https://www.rabbitmq.com/tutorials/tutorial-six-python.html.
-
-### Command queues
-
-Queues consumed from by a single service, command queues gives a service
-a way of exposing an API to other services. Commands can be sent to the
-named queue and the owning service consumes from it.
+Reconnection attempts will be made with an increasing delay between attempts.
+The first attempt is instantaneous, the second is delayed by 1 second, the 
+third by 2 seconds, etc. After the 9th attempt, the following reconnects 
+will be made at 30 second intervals.
 
 ## Logging
 
-`rabbitmq_client` uses python logging, to tap into the logging flow you need
-to provide a `Queue` object from the `multiprocessing` module when
-instantiating the client (the `log_queue` kwarg). A queue is used since the
-consumer and producer is run in separate processes, and to streamline handling
-of logging records, each log record from all processes is put on a single
-queue. The consumer and producer processes set up `QueueHandler`s each with
-`log_level` set to `logging.DEBUG`. This means that ALL log records will be
-put on the `multiprocessing.Queue`.
+`rabbitmq_client` follows Python logging standards and is by default disabled.
+To enable logging, attach a handler to `rabbitmq_client`:
 
-An application using the `rabbitmq_client` that wants to enable logging
-needs to do the following BEFORE instantiating the `rabbitmq_client`:
+```Python
+import logging
 
-```
-# Configure the logger for the current process, log to a queue handler
-logger = logging.getLogger('rabbitmq_client')
-logger.setLevel(WANTED_LOGGING_LEVEL)
-
-queue = multiprocessing.Queue()
-queue_handler = logging.handlers.QueueHandler(queue)
-queue_handler.setLevel(WANTED_LOGGING_LEVEL)
-
-logger.addHandler(queue_handler)
-
-# Create a handler of your choice to log messages, this is where all client
-# logging messages will end up
-file_handler = logging.FileHandler("rmq_client.log", mode='w')
-file_handler.setLevel(WANTED_LOGGING_LEVEL)
-
-# The queue listener is the final handler for all logging messages related to
-# the client
-listener = logging.handlers.QueueListener(
-    queue,
-    file_handler,
-    respect_handler_level=True
-)
-listener.start()
-
-# Now declare the client and pass the log queue to it. The client will
-# ensure that the consumer and producer processes put all logging messages on
-# the supplied queue
-client = RMQClient(log_queue=queue)
-client.start()
+logging.getLogger("rabbitmq_client").addHandler(logging.StreamHandler())
 ```
 
-The example above ensures all processes log to the file `rmq_client.log`, and
-that the application using `rabbitmq_client` can determine the log level using
-the `respect_handler_level` kwarg.
+By default, a `logging.NullHandler()` is attached to this logger.

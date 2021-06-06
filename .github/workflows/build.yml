@@ -48,13 +48,17 @@ jobs:
 
     - name: Lint Python code with flake8
       run: |
-        flake8 `find rabbitmq_client -name "*.py"`
+        flake8 `find . -name "*.py"`
 
     #
     # Run tests
     #
 
-    - name: Run test cases
+    - name: Run unit tests
       run: |
-        echo $PWD
-        python -m unittest
+        coverage run --source rabbitmq_client -m unittest \
+          tests.test_connection \
+          tests.test_consumer \
+          tests.test_producer -f
+        coverage report -m --fail-under 96
+    # TODO: Add integration tests

@@ -1,152 +1,383 @@
+import functools
 import logging
+import uuid
 
-from multiprocessing import Queue as IPCQueue, Process
+from threading import Lock
 
-from .producer_connection import create_producer_connection
-from .producer_defs import Publish, RPCRequest, RPCResponse, Command
+from pika.spec import Basic
 
+from rabbitmq_client.connection import RMQConnection
+from rabbitmq_client.defs import (
+    ConfirmModeOK,
+    DeliveryError,
+    DEFAULT_EXCHANGE
+)
 
 LOGGER = logging.getLogger(__name__)
 
 
-class RMQProducer:
-    """
-    Interface for producer-related operations towards a RabbitMQ server.
-
-    =================
-    Pub/Sub
-    =================
-    Supported, not much to say really. Will publish to named exchange and use
-    'fanout' to distribute messages to all listening queues.
-
-    =================
-    RPC
-    =================
-    Acts more as an interface towards the producer connection for the
-    RPCHandler than actually doing something useful. Only instantiates work
-    items and puts them on the work queue.
-    """
+class RMQPublish:
 
     def __init__(self,
-                 log_queue=None,
-                 connection_parameters=None,
-                 daemonize=False):
+                 body,
+                 exchange_params=None,
+                 routing_key="",
+                 queue_params=None,
+                 publish_params=None,
+                 publish_key=None):
         """
-        :param log_queue: queue to post logging messages to
-        :type log_queue: multiprocessing.Queue
-        :param connection_parameters: connection parameters to the RMQ server
-        :type connection_parameters: pika.ConnectionParameters
-        :param daemonize: True if connection processes should be daemons
-        :type daemonize: bool
+        :param body: bytes
+        :param exchange_params: rabbitmq_client.ExchangeParams
+        :param routing_key: str
+        :param queue_params: rabbitmq_client.QueueParams
+        :param publish_params: rabbitmq_client.PublishParams
+        :param publish_key: str
         """
-        LOGGER.debug("__init__")
+        self.body = body
+        self.exchange_params = exchange_params
+        self.routing_key = routing_key
+        self.queue_params = queue_params
+        self.publish_params = publish_params
+        self.publish_key = publish_key
 
-        self._work_queue = IPCQueue()
 
-        self._connection_process = Process(
-            daemon=daemonize,
-            target=create_producer_connection,
-            args=(
-                self._work_queue,
-            ),
-            kwargs={
-                'log_queue': log_queue,
-                'connection_parameters': connection_parameters
-            }
-        )
+class RMQProducer(RMQConnection):
+    """
+    Generic producer implementation using the RMQConnection base class to ease
+    connection and channel handling.
+    """
+
+    def __init__(self, connection_parameters=None):
+        """
+        :param connection_parameters: pika.ConnectionParameters
+        """
+        super().__init__(connection_parameters=connection_parameters)
+
+        self._ready = False
+
+        self._buffered_messages = list()
+
+        self._confirm_mode_active = False
+        self._confirm_delivery_callback = None
+        self._next_delivery_tag = 1
+        self._publish_lock = Lock()
+        self._unacked_publishes = dict()
+
+    @property
+    def ready(self):
+        """
+        Indicates if the consumer is ready, meaning it will immediately issue
+        consume-work it receives. If the consumer is NOT ready, incoming
+        consumes will be delayed until the underlying connection reports ready
+        through the 'on_ready' hook.
+
+        :return: bool
+        """
+        return self._ready
 
     def start(self):
         """
-        Starts the producer's connection process in order to be able to publish
-        messages. The connection process is maintained in another process, the
-        work queue passed along to the new process is process shared to allow
-        for the controlling process to issue commands to the connection
-        process, for example to publish messages.
-        """
-        LOGGER.info("start")
+        Starts the consumer by initiating the underlying connection.
 
-        self._connection_process.start()
+        NOTE! This is NOT a synchronous operation! If you must know that the
+        consumer is successfully started, monitor the 'ready' property.
+        """
+        LOGGER.info("starting producer")
+
+        super().start()
+
+    def restart(self):
+        """Restarts the consumer by re-initiating the underlying connection."""
+        LOGGER.info("restarting producer")
+
+        super().restart()
 
     def stop(self):
+        """Stops the consumer by stopping the underlying connection."""
+        LOGGER.info("stopping producer")
+
+        super().stop()
+
+    def publish(self,
+                body,
+                exchange_params=None,
+                routing_key="",
+                queue_params=None,
+                publish_params=None):
         """
-        Stops the RMQConsumer, tearing down the RMQProducerConnection process.
+        Publish 'body' towards an exchange (optional routing key) or a queue.
+        You must provide EITHER exchange_params OR queue_params to handle
+        the declaration of the publish target, but not both.
+
+        The reasoning here is that a publisher may produce a message to an
+        exchange, but is not responsible for declaring the end-queue and its
+        binding. So, publish only declares the entity to which it produces its
+        message(s) but should not know all the details of an exchange-bound
+        queues properties. For work queues, the producer of course needs to
+        know declaration details since there is no intermediate step to publish
+        to.
+
+        If confirm mode is activated, a key is returned which corresponds to
+        the message being published. Users can confirm that their publish has
+        been sent successfully by waiting for their key to be referred to in
+        a call to their confirm mode notify callback where the input parameter
+        == the generated publish key.
+
+        :param body: bytes
+        :param exchange_params: rabbitmq_client.ExchangeParams
+        :param routing_key: str
+        :param queue_params: rabbitmq_client.QueueParams
+        :param publish_params: rabbitmq_client.PublishParams
+        :returns: str
         """
-        LOGGER.info("stop")
+        LOGGER.info("publishing")
+        LOGGER.debug(f"exchange: {exchange_params}, routing_key: "
+                     f"{routing_key}, queue: {queue_params}")
 
-        self.flush_and_close_queues()
+        if (
+                (not exchange_params and not queue_params) or
+                (exchange_params and queue_params)
+        ):
+            raise ValueError(
+                "You need to provide either a queue OR an exchange, else "
+                "there is nothing to publish to..."
+            )
 
-        self._connection_process.terminate()
-        self._connection_process.join(timeout=2)
+        publish_key = None
+        if self._confirm_delivery_callback is not None:
+            publish_key = str(uuid.uuid4())
 
-        if self._connection_process.exitcode is not None:
-            self._connection_process.close()  # Release resources
+        if (
+                self.ready and
+                (
+                    (self._confirm_delivery_callback is not None and
+                     self._confirm_mode_active) or
+                    self._confirm_delivery_callback is None
+                )
+        ):
+            self._handle_publish(body,
+                                 exchange_params,
+                                 routing_key,
+                                 queue_params,
+                                 publish_params,
+                                 publish_key)
+
         else:
-            LOGGER.warning("Producer process did not exit within time limit")
+            self._buffered_messages.append(
+                RMQPublish(body,
+                           exchange_params=exchange_params,
+                           routing_key=routing_key,
+                           queue_params=queue_params,
+                           publish_params=publish_params,
+                           publish_key=publish_key)
+            )
 
-    def flush_and_close_queues(self):
+        return publish_key
+
+    def activate_confirm_mode(self, notify_callback):
         """
-        Flushed process shared queues in an attempt to stop background threads.
+        :param notify_callback: callable
         """
-        LOGGER.debug("flush_and_close_queues")
-        while not self._work_queue.empty():
-            self._work_queue.get()
-        self._work_queue.close()
-        # In order for client.stop() to be reliable and consistent, ensure
-        # thread stop.
-        self._work_queue.join_thread()
+        if self.ready and self._confirm_delivery_callback is None:
+            LOGGER.info("activating confirm delivery mode")
+            self.confirm_delivery(self.on_delivery_confirmed,
+                                  callback=self.on_confirm_select_ok)
 
-    def publish(self, topic, message):
+        self._confirm_delivery_callback = notify_callback
+
+    def _handle_publish(self,
+                        body,
+                        exchange_params,
+                        routing_key,
+                        queue_params,
+                        publish_params,
+                        publish_key):
         """
-        Publishes a message on the supplied topic.
-
-        :param str topic: topic to publish on
-        :param bytes message: message content
+        :param body: bytes
+        :param exchange_params: rabbitmq_client.ExchangeParams
+        :param routing_key: str
+        :param queue_params: rabbitmq_client.QueueParams
+        :param publish_params: rabbitmq_client.PublishParams
+        :param publish_key: str
         """
-        LOGGER.debug("publish")
+        if queue_params:
 
-        self._work_queue.put(Publish(topic, message))
+            cb = functools.partial(self.on_queue_declared,
+                                   body,
+                                   publish_params=publish_params,
+                                   publish_key=publish_key)
 
-    def rpc_request(self, receiver, message, correlation_id, reply_to):
+            self.declare_queue(queue_params, callback=cb)
+
+        else:
+            cb = functools.partial(self.on_exchange_declared,
+                                   body,
+                                   exchange_params,
+                                   routing_key=routing_key,
+                                   publish_params=publish_params,
+                                   publish_key=publish_key)
+
+            self.declare_exchange(exchange_params, callback=cb)
+
+    def on_queue_declared(self,
+                          body,
+                          frame,
+                          publish_params=None,
+                          publish_key=None):
         """
-        Interface for sending an RPC request to the producer connection.
-
-        :param receiver: receiving RPC queue name
-        :param message: contents to send
-        :param correlation_id: identifies the request
-        :param reply_to: response queue name
+        :param body: bytes
+        :param frame: pika.frame.Method
+        :param publish_params: rabbitmq_client.PublishParams
+        :param publish_key: str
         """
-        LOGGER.debug(f"rpc_request receiver: {receiver} message: {message} "
-                     f"correlation_id: {correlation_id} reply_to: {reply_to}")
+        LOGGER.info(f"declared queue: {frame.method.queue}")
 
-        self._work_queue.put(RPCRequest(receiver,
-                                        message,
-                                        correlation_id,
-                                        reply_to))
+        self._finalize_publish(body,
+                               routing_key=frame.method.queue,
+                               publish_params=publish_params,
+                               publish_key=publish_key)
 
-    def rpc_response(self, receiver, message, correlation_id):
+    def on_exchange_declared(self,
+                             body,
+                             exchange_params,
+                             _frame,
+                             routing_key="",
+                             publish_params=None,
+                             publish_key=None):
         """
-        Interface for sending an RPC response to the producer connection.
-
-        :param receiver: receiving RPC response queue name
-        :param message: contents to send
-        :param correlation_id: identifies which request the response belongs to
+        :param body: bytes
+        :param exchange_params: rabbitmq_client.ExchangeParams
+        :param _frame: pika.frame.Method
+        :param routing_key: str
+        :param publish_params: rabbitmq_client.PublishParams
+        :param publish_key: str
         """
-        LOGGER.debug(f"rpc_reply receiver: {receiver} message: {message} "
-                     f"correlation_id: {correlation_id}")
+        LOGGER.info(f"declared exchange: {exchange_params.exchange}")
 
-        self._work_queue.put(RPCResponse(receiver,
-                                         message,
-                                         correlation_id))
+        self._finalize_publish(body,
+                               exchange=exchange_params.exchange,
+                               routing_key=routing_key,
+                               publish_params=publish_params,
+                               publish_key=publish_key)
 
-    def command(self, command_queue, command):
+    def _finalize_publish(self,
+                          body,
+                          exchange=DEFAULT_EXCHANGE,
+                          routing_key="",
+                          publish_params=None,
+                          publish_key=None):
         """
-        Send command to specified command queue.
-
-        :param command_queue: name of the command queue to send the command to
-        :type command_queue: str
-        :param command: command to send to command queue
-        :type command: bytes
+        :param body: bytes
+        :param exchange: str
+        :param routing_key: str
+        :param publish_params: rabbitmq_client.PublishParams
+        :param publish_key: str
         """
-        LOGGER.debug(f"command {command} to {command_queue}")
 
-        self._work_queue.put(Command(command_queue, command))
+        if publish_key is not None:
+            with self._publish_lock:
+                self._unacked_publishes[self._next_delivery_tag] = publish_key
+                self._next_delivery_tag += 1
+
+                self.basic_publish(body,
+                                   exchange=exchange,
+                                   routing_key=routing_key,
+                                   publish_params=publish_params)
+
+        else:
+            self.basic_publish(body,
+                               exchange=exchange,
+                               routing_key=routing_key,
+                               publish_params=publish_params)
+
+    def _empty_buffered_messages(self):
+        """
+        Sends all buffered messages.
+        """
+        for buffered_message in self._buffered_messages:
+            self._handle_publish(buffered_message.body,
+                                 buffered_message.exchange_params,
+                                 buffered_message.routing_key,
+                                 buffered_message.queue_params,
+                                 buffered_message.publish_params,
+                                 buffered_message.publish_key)
+
+        self._buffered_messages = list()
+
+    def on_confirm_select_ok(self, _frame):
+        """
+        :param _frame: pika.frame.Method
+        """
+        LOGGER.info("confirm select ok")
+        self._confirm_mode_active = True
+        self._confirm_delivery_callback(ConfirmModeOK())
+
+        self._empty_buffered_messages()
+
+    def on_delivery_confirmed(self, frame):
+        """
+        :param frame: pika.frame.Method
+        """
+        publish_key = self._unacked_publishes.pop(
+            frame.method.delivery_tag
+        )
+
+        if isinstance(frame.method, Basic.Ack):
+            self._confirm_delivery_callback(publish_key)
+
+        else:
+            LOGGER.error(f"broker nacked a publish: {frame}")
+            self._confirm_delivery_callback(
+                DeliveryError(publish_key)
+            )
+
+    def on_ready(self):
+        """
+        Connection hook, called when channel opened, meaning RMQConnection is
+        ready for work.
+        """
+        LOGGER.info("producer connection ready")
+
+        self._ready = True
+
+        if self._confirm_delivery_callback is not None:
+            self.confirm_delivery(self.on_delivery_confirmed,
+                                  callback=self.on_confirm_select_ok)
+
+        else:
+            self._empty_buffered_messages()
+
+    def on_close(self, permanent=False):
+        """
+        Connection hook, called when the channel or connection is closed.
+
+        NOTE!
+        This is NOT reported as an error because users are expected to
+        configure their exchanges and queues accordingly to avoid losing data
+        they cannot live without.
+
+        :param permanent: bool
+        """
+        if permanent:
+            LOGGER.critical("producer connection permanently closed")
+        else:
+            LOGGER.info("producer connection closed")
+
+        self._ready = False
+        self._confirm_mode_active = False
+        # Delivery tags are channel-specific, so connection going down means
+        # the tag is reset.
+        self._next_delivery_tag = 1
+
+    def on_error(self):
+        """
+        Connection hook, called when the connection has encountered an error.
+        """
+        LOGGER.info("producer connection error")
+
+        raise NotImplementedError
+        # Possible errors:
+        # * channel died and will not recover
+        # * callback for operation failed
+        # * declaration with faulty parameters attempted
+        # TODO: Add possibility to signal user that an error has occurred.
