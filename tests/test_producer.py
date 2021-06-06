@@ -10,7 +10,8 @@ from rabbitmq_client import (
     QueueParams,
     PublishParams,
     ConfirmModeOK,
-    DeliveryError
+    DeliveryError,
+    DEFAULT_EXCHANGE
 )
 
 
@@ -89,7 +90,7 @@ class TestProducer(unittest.TestCase):
                                         publish_params=None)
         self.producer.basic_publish.assert_called_with(
             b"body",
-            exchange=None,
+            exchange=DEFAULT_EXCHANGE,
             routing_key=queue_params.queue,
             publish_params=None
         )
