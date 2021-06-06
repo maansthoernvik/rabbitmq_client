@@ -9,7 +9,8 @@ from pika.spec import Basic
 from rabbitmq_client.connection import RMQConnection
 from rabbitmq_client.defs import (
     ConfirmModeOK,
-    DeliveryError
+    DeliveryError,
+    DEFAULT_EXCHANGE
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -200,6 +201,7 @@ class RMQProducer(RMQConnection):
         :param publish_key: str
         """
         if queue_params:
+
             cb = functools.partial(self.on_queue_declared,
                                    body,
                                    publish_params=publish_params,
@@ -260,8 +262,8 @@ class RMQProducer(RMQConnection):
 
     def _finalize_publish(self,
                           body,
-                          exchange=None,
-                          routing_key=None,
+                          exchange=DEFAULT_EXCHANGE,
+                          routing_key="",
                           publish_params=None,
                           publish_key=None):
         """
@@ -271,6 +273,7 @@ class RMQProducer(RMQConnection):
         :param publish_params: rabbitmq_client.PublishParams
         :param publish_key: str
         """
+
         if publish_key is not None:
             with self._publish_lock:
                 self._unacked_publishes[self._next_delivery_tag] = publish_key

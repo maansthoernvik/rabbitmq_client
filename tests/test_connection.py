@@ -430,7 +430,7 @@ class TestConnectionDeclarations(unittest.TestCase):
         """
         # Prep
         def consume_on_msg(): ...
-        consume_params = ConsumeParams(consume_on_msg, queue="queue")
+        consume_params = ConsumeParams(consume_on_msg)
         def consumer_on_msg(): ...
         def on_consume_ok(): ...
 
@@ -459,7 +459,7 @@ class TestConnectionDeclarations(unittest.TestCase):
 
         # Prep
         def consume_on_msg(): ...
-        consume_params = ConsumeParams(consume_on_msg, queue="queue")
+        consume_params = ConsumeParams(consume_on_msg)
         def on_consume_ok(): ...
 
         # Test

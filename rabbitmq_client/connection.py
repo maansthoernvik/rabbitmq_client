@@ -208,7 +208,9 @@ class RMQConnection(ABC):
         if not publish_params:
             publish_params = PublishParams()  # Create defaults
 
-        self._channel.basic_publish(exchange, routing_key, body,
+        self._channel.basic_publish(exchange=exchange,
+                                    routing_key=routing_key,
+                                    body=body,
                                     properties=publish_params.properties,
                                     mandatory=publish_params.mandatory)
 

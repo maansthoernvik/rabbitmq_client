@@ -231,6 +231,7 @@ class RMQConsumer(RMQConnection):
         consume_params.queue = frame.method.queue
 
         if exchange_params is not None:
+
             cb = functools.partial(self.on_exchange_declared,
                                    exchange_params,
                                    consume_params=consume_params,

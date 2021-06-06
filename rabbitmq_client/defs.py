@@ -60,7 +60,6 @@ class ConsumeParams:
 
     def __init__(self,
                  on_message_callback,
-                 queue=None,
                  auto_ack=False,
                  exclusive=False,
                  consumer_tag=None,
@@ -72,16 +71,20 @@ class ConsumeParams:
         Excluding the "passive" and "callback" options. Passive may not be used
         in this context, and callback is used by the connection object.
 
-        Queue is optional and must not be provided in case a queue is to be
-        declared before consuming will start, for example through a call to
-        RMQConsumer.consume, which takes as input QueueParams.
+        The queue property is for internal use ONLY, and hence is not exposed
+        in this class' constructor.
+
+        Consumer tag may be provided to force the use of a particular tag,
+        the tag used in the end is communicated to 'on_message_callback' when
+        consuming has successfully started through a ConsumeOK class instance.
         """
         self.on_message_callback = on_message_callback
-        self._queue = queue
         self.auto_ack = auto_ack
         self.exclusive = exclusive
         self._consumer_tag = consumer_tag
         self.arguments = arguments
+
+        self._queue = None
 
     @property
     def queue(self):

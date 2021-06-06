@@ -37,17 +37,9 @@ def on_msg(message):
 
 consumer.consume(
     ConsumeParams(on_msg),
-    queue_params=QueueParams("queue")
-)
-consumer.consume(
-    ConsumeParams(on_msg),
-    exchange_params=ExchangeParams("direct"),
-    routing_key="rkey"
-)
-consumer.consume(
-    ConsumeParams(on_msg),
-    exchange_params=ExchangeParams("fanout",
+    exchange_params=ExchangeParams("direct",
                                    exchange_type=ExchangeType.fanout),
+    routing_key="rkey"
 )
 
 threading.Event().wait()
