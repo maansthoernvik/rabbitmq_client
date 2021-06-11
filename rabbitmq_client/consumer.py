@@ -310,7 +310,7 @@ class RMQConsumer(RMQConnection):
         :param exchange: str
         :param routing_key: str
         """
-        LOGGER.info(f"consume OK for queue: {frame}")
+        LOGGER.info(f"consume OK for queue: {queue_params.queue}")
 
         consume_instance = self._consumes[
             _gen_consume_key(queue=queue_params.queue,

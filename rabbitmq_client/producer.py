@@ -130,9 +130,8 @@ class RMQProducer(RMQConnection):
         :param publish_params: rabbitmq_client.PublishParams
         :returns: str
         """
+        # More detailed logging done on connection level
         LOGGER.info("publishing")
-        LOGGER.debug(f"exchange: {exchange_params}, routing_key: "
-                     f"{routing_key}, queue: {queue_params}")
 
         if (
                 (not exchange_params and not queue_params) or

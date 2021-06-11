@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 
 from threading import Thread, Timer
 
+import pika
 from pika import SelectConnection
 from pika.exceptions import (
     ConnectionClosedByBroker,
@@ -39,7 +40,8 @@ class RMQConnection(ABC):
         :param connection_parameters: pika.ConnectionParameters
         """
         # Kept public to allow restart with different parameters.
-        self.connection_parameters = connection_parameters
+        self.connection_parameters: pika.ConnectionParameters = \
+            connection_parameters
 
         self._connection_thread = Thread(target=self._connect)
         self._connection = None
@@ -133,6 +135,8 @@ class RMQConnection(ABC):
         :param queue_params: rabbitmq_client.QueueParams
         :param callback: callable
         """
+        LOGGER.info(f"declaring queue: {queue_params.queue}")
+
         self._channel.queue_declare(
             queue_params.queue,
             durable=queue_params.durable,
@@ -149,6 +153,8 @@ class RMQConnection(ABC):
         :param exchange_params: rabbitmq_client.ExchangeParams
         :param callback: callable
         """
+        LOGGER.info(f"declaring exchange: {exchange_params.exchange}")
+
         self._channel.exchange_declare(
             exchange_params.exchange,
             exchange_type=exchange_params.exchange_type,
@@ -166,6 +172,10 @@ class RMQConnection(ABC):
         :param queue_bind_params: rabbitmq_client.QueueBindParams
         :param callback: callable
         """
+        LOGGER.info(f"binding queue {queue_bind_params.queue} to exchange "
+                    f"{queue_bind_params.exchange} with routing key: "
+                    f"{queue_bind_params.routing_key}")
+
         self._channel.queue_bind(
             queue_bind_params.queue,
             queue_bind_params.exchange,
@@ -183,6 +193,9 @@ class RMQConnection(ABC):
         :param on_message_callback_override: callable
         :param callback: callable
         """
+        LOGGER.info(f"basic consumer starting for queue: "
+                    f"{consume_params.queue}")
+
         self._channel.basic_consume(
             consume_params.queue,
             (on_message_callback_override if on_message_callback_override
@@ -205,6 +218,9 @@ class RMQConnection(ABC):
         :param routing_key: str
         :param publish_params: rabbitmq_client.PublishParams
         """
+        LOGGER.debug(f"publishing to exchange: {exchange} and routing key: "
+                     f"{routing_key}")
+
         if not publish_params:
             publish_params = PublishParams()  # Create defaults
 
@@ -229,6 +245,13 @@ class RMQConnection(ABC):
         Assigns a new pika.SelectConnection to the connection and starts its
         ioloop to begin connecting.
         """
+        if self.connection_parameters is not None:
+            LOGGER.info(f"starting connection towards: "
+                        f"{self.connection_parameters.host}:"
+                        f"{self.connection_parameters.port}")
+        else:
+            LOGGER.info("starting connection towards: 127.0.0.1:5672")
+
         self._connection = SelectConnection(
             parameters=self.connection_parameters,
             on_open_callback=self.on_connection_open,
@@ -243,7 +266,7 @@ class RMQConnection(ABC):
 
         :param _connection: pika.SelectConnection
         """
-        LOGGER.info("connection opened")
+        LOGGER.debug("connection opened")
         # Do NOT reset reconnect counter here, do it after channel opened.
 
         self._connection.channel(on_open_callback=self.on_channel_open)
@@ -276,35 +299,39 @@ class RMQConnection(ABC):
         :param _connection: pika.SelectConnection
         :param reason: pika.exceptions.?
         """
-        self.on_close()  # Signal subclass that connection is down.
+        permanent = False
 
         # This should ensure the current thread runs to completion after
         # on_connection_closed handling is done.
         self._connection.ioloop.stop()
 
         if not self._closing and type(reason) in RECONNECT_REASONS:
-            LOGGER.info(f"connection closed: {reason}, attempting reconnect")
+            LOGGER.debug(f"connection closed: {reason}, attempting reconnect")
             self._reconnect()
 
         elif self._restarting:
-            LOGGER.info("connection closed, restarting now")
+            LOGGER.debug("connection closed, restarting now")
             # Reset to prevent reconnect for any reason
             self._restarting = False
             self._connection_thread = Thread(target=self._connect)
             self._connection_thread.start()
 
         else:
-            LOGGER.error(f"connection closed: {reason}, will not reconnect")
+            permanent = True
+            LOGGER.warning(f"connection closed: {reason}, will not reconnect")
+
+        # Signal subclass that connection is down.
+        self.on_close(permanent=permanent)
 
     def _reconnect(self):
         """
         Starts up the connection again after a gradually increasing delay.
         """
-        LOGGER.info(f"reconnect, attempt no. {self._reconnect_attempts + 1}")
+        LOGGER.debug(f"reconnect, attempt no. {self._reconnect_attempts + 1}")
 
         # Reconnect attempt may have been queued up before 'stop' was called.
         if self._closing:
-            LOGGER.info("skipping reconnect, connection stopped")
+            LOGGER.debug("skipping reconnect, connection stopped")
             return
 
         # _connect will assign a new connection object
@@ -331,7 +358,7 @@ class RMQConnection(ABC):
 
         :param channel: pika.channel.Channel
         """
-        LOGGER.info("channel opened")
+        LOGGER.debug("channel opened")
         self._reconnect_attempts = 0
 
         self._channel = channel
