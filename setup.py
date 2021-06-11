@@ -18,7 +18,7 @@ URL = 'https://github.com/maansthoernvik/rabbitmq_client'
 EMAIL = 'thornvik.mans@gmail.com'
 AUTHOR = 'Måns Thörnvik'
 REQUIRES_PYTHON = '>=3.6.0'
-VERSION = '2.0.1'
+VERSION = '2.0.2'
 
 # What packages are required for this module to be executed?
 REQUIRED = [

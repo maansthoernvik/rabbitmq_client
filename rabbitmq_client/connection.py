@@ -43,7 +43,8 @@ class RMQConnection(ABC):
         self.connection_parameters: pika.ConnectionParameters = \
             connection_parameters
 
-        self._connection_thread = Thread(target=self._connect)
+        self._connection_thread = Thread(target=self._connect,
+                                         daemon=True)
         self._connection = None
         self._channel = None
 
@@ -96,8 +97,6 @@ class RMQConnection(ABC):
         next second, meaning the user is given faulty information. Start
         success is therefore indicated via the 'on_ready' hook instead.
         """
-        LOGGER.info("starting connection")
-
         if not self._connection_thread.is_alive():
             self._connection_thread.start()
 
@@ -313,7 +312,8 @@ class RMQConnection(ABC):
             LOGGER.debug("connection closed, restarting now")
             # Reset to prevent reconnect for any reason
             self._restarting = False
-            self._connection_thread = Thread(target=self._connect)
+            self._connection_thread = Thread(target=self._connect,
+                                             daemon=True)
             self._connection_thread.start()
 
         else:
@@ -335,7 +335,8 @@ class RMQConnection(ABC):
             return
 
         # _connect will assign a new connection object
-        self._connection_thread = Thread(target=self._connect)
+        self._connection_thread = Thread(target=self._connect,
+                                         daemon=True)
         if self._reconnect_attempts == 0:  # retry immediately the first time
             self._connection_thread.start()
 
