@@ -231,7 +231,8 @@ class TestConnectionBase(unittest.TestCase):
 
         # Assertions
         thread.assert_called_with(
-            target=self.conn_imp._connect
+            target=self.conn_imp._connect,
+            daemon=True,
         )
         self.conn_imp._connection_thread.start.assert_called()
         self.assertEqual(self.conn_imp._reconnect_attempts, 1)
