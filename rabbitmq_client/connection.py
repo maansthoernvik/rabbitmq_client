@@ -323,6 +323,10 @@ class RMQConnection(ABC):
         # Signal subclass that connection is down.
         self.on_close(permanent=permanent)
 
+    @property
+    def _reconnect_delay(self):
+        return self._reconnect_attempts if self._reconnect_attempts < 9 else 30
+
     def _reconnect(self):
         """
         Starts up the connection again after a gradually increasing delay.
@@ -337,13 +341,12 @@ class RMQConnection(ABC):
         # _connect will assign a new connection object
         self._connection_thread = Thread(target=self._connect,
                                          daemon=True)
-        if self._reconnect_attempts == 0:  # retry immediately the first time
+        if self._reconnect_delay == 0:  # retry immediately the first time
             self._connection_thread.start()
 
         else:  # calculate backoff timer
             timer = Timer(
-                self._reconnect_attempts if self._reconnect_attempts < 9
-                else 30,
+                self._reconnect_delay,
                 self._connection_thread.start
             )
             # Timer daemon exits if program exits, to avoid eternal retries.
