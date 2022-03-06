@@ -11,6 +11,11 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+    services:
+      rabbitmq:
+        image: rabbitmq:3-management
+        ports:
+          - 5672:5672
 
     steps:
     - uses: actions/checkout@v2
@@ -59,6 +64,7 @@ jobs:
         coverage run --source rabbitmq_client -m unittest \
           tests.test_connection \
           tests.test_consumer \
-          tests.test_producer -f
+          tests.test_producer \
+          tests.test_integration -f
         coverage report -m --fail-under 96
     # TODO: Add integration tests
