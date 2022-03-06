@@ -45,6 +45,38 @@ delayed until it is. When a consume has been successfully started, the bound
 callback will receive a ``ConsumeOK`` object containing the resulting 
 consumer tag.
 
+### Manual ack mode
+
+By default, the consumer will automatically send a ``basic_ack`` for each consumed
+message. By passing the ``manual_ack`` kwarg to the ``consume`` interface 
+you can opt to manually acknowledge incoming messages:
+
+```python
+from rabbitmq_client import RMQConsumer, ConsumeParams, QueueParams
+
+from some_other_module import handle_msg
+
+
+def on_message(msg, ack=None):
+    error = handle_msg(msg)
+    
+    if not error:
+        ack()
+
+consumer = RMQConsumer()
+consumer.start()
+consumer.consume(ConsumeParams(on_message),
+                 queue_params=QueueParams("queue_name"),
+                 manual_ack=True)
+```
+
+Above is an example of how to enable manual ack mode. When manual ack mode is
+enabled, the ``on_message_callback`` parameter of the ``ConsumeParams`` object
+must accept the additional ``ack`` kwarg. The ``ack`` kwarg is a function
+which, when called, acknowledges the message which prompted the call to the
+``on_message_callback``. This leaves it up to the user to decide when to ack
+an incoming message.
+
 ## Producer
 `RMQProducer` extends the `RMQConnection` base class with two additional 
 methods: `publish` and `activate_confirm_mode`. Publish is used, as it 

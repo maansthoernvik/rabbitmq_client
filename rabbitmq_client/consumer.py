@@ -38,17 +38,21 @@ class RMQConsume:
                  consume_params,
                  queue_params,
                  exchange_params,
-                 routing_key):
+                 routing_key,
+                 manual_ack=False):
         """
         :param consume_params: rabbitmq_client.ConsumeParams
         :param queue_params: rabbitmq_client.QueueParams
         :param exchange_params: rabbitmq_client.ExchangeParams
+        :param manual_ack: bool
         :param routing_key: str
         """
         self.consume_params = consume_params
         self.queue_params = queue_params
         self.exchange_params = exchange_params
         self.routing_key = routing_key
+
+        self.manual_ack = manual_ack
 
         # The actual consumer tag from 'basic_consume'. This will be equal to
         # 'self.consume_params.consumer_tag' if one was set by the caller,
@@ -124,7 +128,8 @@ class RMQConsumer(RMQConnection):
                 consume_params,
                 queue_params=None,
                 exchange_params=None,
-                routing_key=None):
+                routing_key=None,
+                manual_ack=False):
         """
         General consumer interface, when wanting to consumer messages sent to a
         specific queue or exchange. Input parameters are a subset of those used
@@ -153,6 +158,7 @@ class RMQConsumer(RMQConnection):
         :param queue_params: rabbitmq_client.QueueParams
         :param exchange_params: rabbitmq_client.ExchangeParams
         :param routing_key: str
+        :param manual_ack: bool
         :returns: str
         """
         LOGGER.info("starting consume")
@@ -171,13 +177,14 @@ class RMQConsumer(RMQConnection):
         )
         if self._consumes.get(consume_key) is not None:
             raise ValueError(
-                "That combination of queue + exchange + routing key already "
-                "exists."
+                "That combination of queue + exchange + routing key is "
+                "already consumed from."
             )
 
         # 2. Update consumer instance
         self._consumes[consume_key] = RMQConsume(
-            consume_params, queue_params, exchange_params, routing_key
+            consume_params, queue_params, exchange_params, routing_key,
+            manual_ack=manual_ack
         )
 
         # 3. Start declaring shit
@@ -340,16 +347,26 @@ class RMQConsumer(RMQConnection):
         :param _basic_properties: pika.spec.Basic.Properties
         :param body: bytes
         """
-        consume_params = (self._consumes[basic_deliver.consumer_tag]
-                              .consume_params)
+        consume = self._consumes[basic_deliver.consumer_tag]
 
         try:
-            consume_params.on_message_callback(body)
+            if consume.manual_ack:
+                consume.consume_params.on_message_callback(
+                    body,
+                    ack=lambda:
+                        channel.basic_ack(
+                            delivery_tag=basic_deliver.delivery_tag
+                        )
+                )
+            else:
+                consume.consume_params.on_message_callback(body)
         except Exception as e:
             LOGGER.warning(f"the on_message_callback for queue: "
-                           f"{consume_params.queue} crashed with error: {e}")
-
-        channel.basic_ack(delivery_tag=basic_deliver.delivery_tag)
+                           f"{consume.consume_params.queue} "
+                           f"crashed with error: {e}")
+        finally:
+            if not consume.manual_ack:
+                channel.basic_ack(delivery_tag=basic_deliver.delivery_tag)
 
     def on_ready(self):
         """
