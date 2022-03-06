@@ -79,6 +79,18 @@ class TestConsumer(unittest.TestCase):
         self.consumer.bind_queue = Mock()
         self.consumer.basic_consume = Mock()
 
+    def set_up_confirmed_consume(self, manual_ack=False) -> str:
+        """Helper that sets up queue-only confirmed consume."""
+        queue_params = QueueParams("queue")
+        self.consumer.consume(ConsumeParams(lambda _: ...),
+                              queue_params=queue_params,
+                              manual_ack=manual_ack)
+        frame_mock = Mock()
+        frame_mock.method.consumer_tag = "123"
+        self.consumer.on_consume_ok(frame_mock, queue_params=queue_params)
+
+        return "123"
+
     def test_consumer_readiness(self):
         """Verify the consumer's ready property changes as expected."""
         self.assertTrue(self.consumer.ready)
@@ -362,17 +374,6 @@ class TestConsumer(unittest.TestCase):
         # Assertion is that no unhandled exception happens :-)
         self.consumer.on_consume_ok(Mock(), queue_params=queue_params)
 
-    def set_up_confirmed_consume(self) -> str:
-        """Helper that sets up queue-only confirmed consume."""
-        queue_params = QueueParams("queue")
-        self.consumer.consume(ConsumeParams(lambda _: ...),
-                              queue_params=queue_params)
-        frame_mock = Mock()
-        frame_mock.method.consumer_tag = "123"
-        self.consumer.on_consume_ok(frame_mock, queue_params=queue_params)
-
-        return "123"
-
     def test_on_consume_ok_on_close_consumes_entry_handling(self):
         """
         Verify receiving a call to on_consume_ok creates as additional entry in
@@ -490,3 +491,22 @@ class TestConsumer(unittest.TestCase):
                     "a consume did not have its consumer tag cleared when "
                     "on_close was called"
                 )
+
+    def test_manual_ack_consume(self):
+        consumer_tag = self.set_up_confirmed_consume(manual_ack=True)
+
+        def on_msg(_msg, ack=None):
+            ack()
+
+        consume = self.consumer._consumes.get(consumer_tag)
+        consume.consume_params.on_message_callback = on_msg
+
+        basic_deliver = Mock()
+        basic_deliver.consumer_tag = consumer_tag
+        basic_deliver.delivery_tag = 123
+        channel_mock = Mock()
+        ack_mock = Mock()
+        channel_mock.basic_ack = ack_mock
+        self.consumer.on_msg(channel_mock, basic_deliver, Mock(), b"body")
+
+        ack_mock.assert_called_with(delivery_tag=123)

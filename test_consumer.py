@@ -3,10 +3,8 @@ import logging
 import threading
 import sys
 
-from pika.exchange_type import ExchangeType
-
-from rabbitmq_client import RMQConsumer, ConsumeOK
-from rabbitmq_client import ConsumeParams, ExchangeParams
+from rabbitmq_client import RMQConsumer, ConsumeOK, QueueParams
+from rabbitmq_client import ConsumeParams
 
 
 logger = logging.getLogger("rabbitmq_client")
@@ -28,18 +26,18 @@ def stop(*args):
 signal.signal(signal.SIGINT, stop)
 
 
-def on_msg(message):
+def on_msg(message, ack=None):
     if isinstance(message, ConsumeOK):
         print("GOT CONSUME OK")
     else:
         print(f"GOT MESSAGE: {message}")
+        ack()
 
 
 consumer.consume(
     ConsumeParams(on_msg),
-    exchange_params=ExchangeParams("direct",
-                                   exchange_type=ExchangeType.fanout),
-    routing_key="rkey"
+    queue_params=QueueParams("queue"),
+    manual_ack=True
 )
 
 threading.Event().wait()

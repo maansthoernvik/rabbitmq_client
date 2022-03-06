@@ -1,5 +1,4 @@
 import threading
-
 import time
 import unittest
 
@@ -31,6 +30,11 @@ def started(rmq_client, timeout=2.0):
 
 # noinspection DuplicatedCode
 class IntegrationTest(unittest.TestCase):
+
+    # @classmethod
+    # def setUpClass(cls) -> None:
+    #     logger = logging.getLogger("rabbitmq_client")
+    #     logger.addHandler(logging.StreamHandler())
 
     def setUp(self) -> None:
         self.consumer = RMQConsumer()
@@ -308,6 +312,57 @@ class IntegrationTest(unittest.TestCase):
 
         # Stop the extra producer
         producer.stop()
+
+    def test_manual_ack_mode(self):
+        consume_ok = threading.Event()
+        msg = threading.Event()
+
+        def on_msg(_body, ack=None):  # noqa
+            if isinstance(_body, ConsumeOK):
+                consume_ok.set()
+            else:
+                msg.set()
+                ack()
+
+        self.consumer.consume(
+            ConsumeParams(on_msg),
+            queue_params=QueueParams("queue"),
+            manual_ack=True
+        )
+        self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
+
+        self.producer.publish(b"body", queue_params=QueueParams("queue"))
+        self.assertTrue(msg.wait(timeout=2.0))  # await msg
+
+        # ack has been done, consumed messages should not be re-sent
+        msg.clear()
+        self.consumer.restart()
+        self.assertFalse(msg.wait(timeout=1.0))
+
+    def test_manual_ack_mode_no_manual_ack(self):
+        consume_ok = threading.Event()
+        msg = threading.Event()
+
+        def on_msg(_body, ack=None):  # noqa
+            if isinstance(_body, ConsumeOK):
+                consume_ok.set()
+            else:
+                msg.set()
+
+        self.consumer.consume(
+            ConsumeParams(on_msg),
+            queue_params=QueueParams("queue"),
+            manual_ack=True
+        )
+        self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
+
+        self.producer.publish(b"body", queue_params=QueueParams("queue"))
+        self.assertTrue(msg.wait(timeout=2.0))  # await msg
+
+        # no ack happens, restart the connection and see the message pop again
+        msg.clear()
+        self.consumer.restart()
+        self.assertTrue(msg.wait(timeout=1.0))
 
     @classmethod
     def tearDownClass(cls) -> None:
