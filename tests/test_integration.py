@@ -29,8 +29,117 @@ def started(rmq_client, timeout=2.0):
     return True
 
 
+class TestAcknowledgements(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.consumer = RMQConsumer()
+        self.consumer.start()
+        self.assertTrue(started(self.consumer))
+
+        self.producer = RMQProducer()
+        self.producer.start()
+        self.assertTrue(started(self.producer))
+
+    def tearDown(self) -> None:
+        self.consumer.stop()
+        self.producer.stop()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """
+        Need general teardown since not wanting to introduce waits part of
+        test cases. Need to purge queues as consumer/producers are stopped
+        before acking messages, sometimes.
+
+        This teardown enabled re-testability without getting messages sent by
+        a previous run.
+        """
+        client = RMQConsumer()
+        client.start()
+        assert started(client)
+
+        client._channel.queue_purge("queue_fanout_receiver")
+        client._channel.queue_purge("queue")
+
+        client.stop()
+
+    def test_manual_ack_mode(self):
+        consume_ok = threading.Event()
+        msg = threading.Event()
+
+        def on_msg(_body, ack=None):  # noqa
+            if isinstance(_body, ConsumeOK):
+                consume_ok.set()
+            else:
+                msg.set()
+                ack()
+
+        self.consumer.consume(
+            ConsumeParams(on_msg),
+            queue_params=QueueParams("queue")
+        )
+        self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
+
+        self.producer.publish(b"body", queue_params=QueueParams("queue"))
+        self.assertTrue(msg.wait(timeout=2.0))  # await msg
+
+        # ack has been done, consumed messages should not be re-sent
+        msg.clear()
+        self.consumer.restart()
+        self.assertFalse(msg.wait(timeout=0.5))
+
+    def test_manual_ack_mode_no_manual_ack(self):
+        consume_ok = threading.Event()
+        msg = threading.Event()
+
+        def on_msg(_body, ack=None):  # noqa
+            if isinstance(_body, ConsumeOK):
+                consume_ok.set()
+            else:
+                msg.set()
+
+        self.consumer.consume(
+            ConsumeParams(on_msg),
+            queue_params=QueueParams("queue")
+        )
+        self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
+
+        self.producer.publish(b"body", queue_params=QueueParams("queue"))
+        self.assertTrue(msg.wait(timeout=2.0))  # await msg
+
+        # no ack happens, restart the connection and see the message pop again
+        msg.clear()
+        self.consumer.restart()
+        self.assertTrue(msg.wait(timeout=1.0))
+
+    def test_auto_ack_mode(self):
+        consume_ok = threading.Event()
+        message_received = threading.Event()
+
+        def on_msg(_body):  # noqa
+            if isinstance(_body, ConsumeOK):
+                consume_ok.set()
+            else:
+                message_received.set()
+
+        self.consumer.consume(
+            ConsumeParams(on_msg, auto_ack=True),
+            queue_params=QueueParams("queue")
+        )
+        self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
+        self.producer.publish(b"body", queue_params=QueueParams("queue"))
+        self.assertTrue(message_received.wait(timeout=2.0))  # await msg
+
+        # no ack happens, restart the connection and see the message pop again
+        consume_ok.clear()
+        message_received.clear()
+        self.consumer.restart()
+        self.assertTrue(consume_ok.wait(timeout=1.0))
+        self.assertFalse(message_received.wait(timeout=0.5))
+
+
 # noinspection DuplicatedCode
-class IntegrationTest(unittest.TestCase):
+class TestIntegration(unittest.TestCase):
 
     # @classmethod
     # def setUpClass(cls) -> None:
@@ -50,6 +159,25 @@ class IntegrationTest(unittest.TestCase):
         self.consumer.stop()
         self.producer.stop()
 
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """
+        Need general teardown since not wanting to introduce waits part of
+        test cases. Need to purge queues as consumer/producers are stopped
+        before acking messages, sometimes.
+
+        This teardown enabled re-testability without getting messages sent by
+        a previous run.
+        """
+        client = RMQConsumer()
+        client.start()
+        assert started(client)
+
+        client._channel.queue_purge("queue_fanout_receiver")
+        client._channel.queue_purge("queue")
+
+        client.stop()
+
     def test_stop_consumer(self):
         """
         Verify RMQConsumer, when stopped, shuts down completely and releases
@@ -57,6 +185,18 @@ class IntegrationTest(unittest.TestCase):
         """
         # Run test
         self.consumer.stop()
+
+        thread_count = len(threading.enumerate())
+        # Only MainThread should still be running.
+        self.assertEqual(2, thread_count)
+
+    def test_stop_producer(self):
+        """
+        Verify RMQProducer, when stopped, shuts down completely and releases
+        allocated resources.
+        """
+        # Run test
+        self.producer.stop()
 
         thread_count = len(threading.enumerate())
         # Only MainThread should still be running.
@@ -235,6 +375,41 @@ class IntegrationTest(unittest.TestCase):
         event.wait(timeout=1.0)
         self.assertEqual(msg_received, b"body")
 
+
+class TestConfirmMode(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.consumer = RMQConsumer()
+        self.consumer.start()
+        self.assertTrue(started(self.consumer))
+
+        self.producer = RMQProducer()
+        self.producer.start()
+        self.assertTrue(started(self.producer))
+
+    def tearDown(self) -> None:
+        self.consumer.stop()
+        self.producer.stop()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """
+        Need general teardown since not wanting to introduce waits part of
+        test cases. Need to purge queues as consumer/producers are stopped
+        before acking messages, sometimes.
+
+        This teardown enabled re-testability without getting messages sent by
+        a previous run.
+        """
+        client = RMQConsumer()
+        client.start()
+        assert started(client)
+
+        client._channel.queue_purge("queue_fanout_receiver")
+        client._channel.queue_purge("queue")
+
+        client.stop()
+
     def test_confirm_mode(self):
         """
         Verify confirm mode pushes publish_keys to users on successful
@@ -314,96 +489,3 @@ class IntegrationTest(unittest.TestCase):
 
         # Stop the extra producer
         producer.stop()
-
-    def test_manual_ack_mode(self):
-        consume_ok = threading.Event()
-        msg = threading.Event()
-
-        def on_msg(_body, ack=None):  # noqa
-            if isinstance(_body, ConsumeOK):
-                consume_ok.set()
-            else:
-                msg.set()
-                ack()
-
-        self.consumer.consume(
-            ConsumeParams(on_msg),
-            queue_params=QueueParams("queue")
-        )
-        self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
-
-        self.producer.publish(b"body", queue_params=QueueParams("queue"))
-        self.assertTrue(msg.wait(timeout=2.0))  # await msg
-
-        # ack has been done, consumed messages should not be re-sent
-        msg.clear()
-        self.consumer.restart()
-        self.assertFalse(msg.wait(timeout=0.5))
-
-    def test_manual_ack_mode_no_manual_ack(self):
-        consume_ok = threading.Event()
-        msg = threading.Event()
-
-        def on_msg(_body, ack=None):  # noqa
-            if isinstance(_body, ConsumeOK):
-                consume_ok.set()
-            else:
-                msg.set()
-
-        self.consumer.consume(
-            ConsumeParams(on_msg),
-            queue_params=QueueParams("queue")
-        )
-        self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
-
-        self.producer.publish(b"body", queue_params=QueueParams("queue"))
-        self.assertTrue(msg.wait(timeout=2.0))  # await msg
-
-        # no ack happens, restart the connection and see the message pop again
-        msg.clear()
-        self.consumer.restart()
-        self.assertTrue(msg.wait(timeout=1.0))
-
-    def test_auto_ack_mode(self):
-        consume_ok = threading.Event()
-        message_received = threading.Event()
-
-        def on_msg(_body):  # noqa
-            if isinstance(_body, ConsumeOK):
-                consume_ok.set()
-            else:
-                message_received.set()
-
-        self.consumer.consume(
-            ConsumeParams(on_msg, auto_ack=True),
-            queue_params=QueueParams("queue")
-        )
-        self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
-        self.producer.publish(b"body", queue_params=QueueParams("queue"))
-        self.assertTrue(message_received.wait(timeout=2.0))  # await msg
-
-        # no ack happens, restart the connection and see the message pop again
-        consume_ok.clear()
-        message_received.clear()
-        self.consumer.restart()
-        self.assertTrue(consume_ok.wait(timeout=1.0))
-        self.assertFalse(message_received.wait(timeout=0.5))
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        """
-        Need general teardown since not wanting to introduce waits part of
-        test cases. Need to purge queues as consumer/producers are stopped
-        before acking messages, sometimes.
-
-        This teardown enabled re-testability without getting messages sent by
-        a previous run.
-        """
-        client = RMQConsumer()
-        client.start()
-        assert started(client)
-
-        client._channel.queue_purge("queue_fanout_receiver")
-        client._channel.queue_purge("queue")
-
-        client.stop()

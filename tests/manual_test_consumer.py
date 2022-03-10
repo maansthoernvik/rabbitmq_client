@@ -36,8 +36,7 @@ def on_msg(message, ack=None):
 
 consumer.consume(
     ConsumeParams(on_msg),
-    queue_params=QueueParams("queue"),
-    manual_ack=True
+    queue_params=QueueParams("queue")
 )
 
 threading.Event().wait()

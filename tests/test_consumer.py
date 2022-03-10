@@ -492,7 +492,7 @@ class TestConsumer(unittest.TestCase):
                 )
 
     def test_manual_ack_consume(self):
-        consumer_tag = self.set_up_confirmed_consume()
+        consumer_tag = self.set_up_confirmed_consume(auto_ack=False)
 
         def on_msg(_msg, ack=None):
             ack()
