@@ -110,7 +110,7 @@ class RMQConnection(ABC):
             self._connection.close()
             self._restarting = True  # Only if connection could be closed.
         except ConnectionWrongStateError:
-            LOGGER.info("connection closed and could not be restarted")
+            LOGGER.error("connection closed and could not be restarted")
 
     def stop(self):
         """
