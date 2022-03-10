@@ -79,12 +79,11 @@ class TestConsumer(unittest.TestCase):
         self.consumer.bind_queue = Mock()
         self.consumer.basic_consume = Mock()
 
-    def set_up_confirmed_consume(self, manual_ack=False) -> str:
+    def set_up_confirmed_consume(self, auto_ack=False) -> str:
         """Helper that sets up queue-only confirmed consume."""
         queue_params = QueueParams("queue")
-        self.consumer.consume(ConsumeParams(lambda _: ...),
-                              queue_params=queue_params,
-                              manual_ack=manual_ack)
+        self.consumer.consume(ConsumeParams(lambda _: ..., auto_ack=auto_ack),
+                              queue_params=queue_params)
         frame_mock = Mock()
         frame_mock.method.consumer_tag = "123"
         self.consumer.on_consume_ok(frame_mock, queue_params=queue_params)
@@ -398,7 +397,7 @@ class TestConsumer(unittest.TestCase):
         # Prep
         on_message_callback_called = False
 
-        def on_message_callback(msg):
+        def on_message_callback(msg, ack=None):
             if not msg == b'body' or isinstance(msg, ConsumeOK):
                 return
 
@@ -493,7 +492,7 @@ class TestConsumer(unittest.TestCase):
                 )
 
     def test_manual_ack_consume(self):
-        consumer_tag = self.set_up_confirmed_consume(manual_ack=True)
+        consumer_tag = self.set_up_confirmed_consume()
 
         def on_msg(_msg, ack=None):
             ack()

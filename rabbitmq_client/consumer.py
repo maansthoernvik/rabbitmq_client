@@ -38,21 +38,17 @@ class RMQConsume:
                  consume_params,
                  queue_params,
                  exchange_params,
-                 routing_key,
-                 manual_ack=False):
+                 routing_key):
         """
         :param consume_params: rabbitmq_client.ConsumeParams
         :param queue_params: rabbitmq_client.QueueParams
         :param exchange_params: rabbitmq_client.ExchangeParams
-        :param manual_ack: bool
         :param routing_key: str
         """
         self.consume_params = consume_params
         self.queue_params = queue_params
         self.exchange_params = exchange_params
         self.routing_key = routing_key
-
-        self.manual_ack = manual_ack
 
         # The actual consumer tag from 'basic_consume'. This will be equal to
         # 'self.consume_params.consumer_tag' if one was set by the caller,
@@ -128,8 +124,7 @@ class RMQConsumer(RMQConnection):
                 consume_params,
                 queue_params=None,
                 exchange_params=None,
-                routing_key=None,
-                manual_ack=False):
+                routing_key=None):
         """
         General consumer interface, when wanting to consumer messages sent to a
         specific queue or exchange. Input parameters are a subset of those used
@@ -158,7 +153,6 @@ class RMQConsumer(RMQConnection):
         :param queue_params: rabbitmq_client.QueueParams
         :param exchange_params: rabbitmq_client.ExchangeParams
         :param routing_key: str
-        :param manual_ack: bool
         :returns: str
         """
         LOGGER.info("starting consume")
@@ -184,7 +178,6 @@ class RMQConsumer(RMQConnection):
         # 2. Update consumer instance
         self._consumes[consume_key] = RMQConsume(
             consume_params, queue_params, exchange_params, routing_key,
-            manual_ack=manual_ack
         )
 
         # 3. Start declaring shit
@@ -350,7 +343,7 @@ class RMQConsumer(RMQConnection):
         consume = self._consumes[basic_deliver.consumer_tag]
 
         try:
-            if consume.manual_ack:
+            if not consume.consume_params.auto_ack:
                 consume.consume_params.on_message_callback(
                     body,
                     ack=lambda:
@@ -364,9 +357,6 @@ class RMQConsumer(RMQConnection):
             LOGGER.warning(f"the on_message_callback for queue: "
                            f"{consume.consume_params.queue} "
                            f"crashed with error: {e}")
-        finally:
-            if not consume.manual_ack:
-                channel.basic_ack(delivery_tag=basic_deliver.delivery_tag)
 
     def on_ready(self):
         """

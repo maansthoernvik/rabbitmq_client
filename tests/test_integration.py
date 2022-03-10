@@ -12,7 +12,8 @@ from rabbitmq_client import (
     ConsumeParams,
     QueueParams,
     ExchangeParams,
-    ConsumeOK, ConfirmModeOK
+    ConsumeOK,
+    ConfirmModeOK
 )
 
 
@@ -73,7 +74,8 @@ class IntegrationTest(unittest.TestCase):
             msg_received = msg
 
         # Consume
-        consume_key = self.consumer.consume(ConsumeParams(on_msg),
+        consume_key = self.consumer.consume(ConsumeParams(on_msg,
+                                                          auto_ack=True),
                                             queue_params=QueueParams("queue"))
         self.assertEqual(consume_key, "queue")
 
@@ -103,7 +105,7 @@ class IntegrationTest(unittest.TestCase):
 
         # Consume
         consume_key = self.consumer.consume(
-            ConsumeParams(on_msg),
+            ConsumeParams(on_msg, auto_ack=True),
             exchange_params=ExchangeParams("exchange"),
             routing_key="bla.bla"
         )
@@ -137,7 +139,7 @@ class IntegrationTest(unittest.TestCase):
 
         # Consume
         consume_key = self.consumer.consume(
-            ConsumeParams(on_msg),
+            ConsumeParams(on_msg, auto_ack=True),
             exchange_params=ExchangeParams("exchange_fanout",
                                            exchange_type=ExchangeType.fanout)
         )
@@ -173,7 +175,7 @@ class IntegrationTest(unittest.TestCase):
 
         # Consume
         consume_key = self.consumer.consume(
-            ConsumeParams(on_msg),
+            ConsumeParams(on_msg, auto_ack=True),
             exchange_params=ExchangeParams("exchange_fanout",
                                            exchange_type=ExchangeType.fanout),
             queue_params=QueueParams("queue_fanout_receiver")
@@ -210,7 +212,7 @@ class IntegrationTest(unittest.TestCase):
 
         # Consume
         consume_key = self.consumer.consume(
-            ConsumeParams(on_msg),
+            ConsumeParams(on_msg, auto_ack=True),
             exchange_params=ExchangeParams("exchange_direct"),
             routing_key="fish",
             queue_params=QueueParams("queue_direct_receiver")
@@ -326,8 +328,7 @@ class IntegrationTest(unittest.TestCase):
 
         self.consumer.consume(
             ConsumeParams(on_msg),
-            queue_params=QueueParams("queue"),
-            manual_ack=True
+            queue_params=QueueParams("queue")
         )
         self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
 
@@ -337,7 +338,7 @@ class IntegrationTest(unittest.TestCase):
         # ack has been done, consumed messages should not be re-sent
         msg.clear()
         self.consumer.restart()
-        self.assertFalse(msg.wait(timeout=1.0))
+        self.assertFalse(msg.wait(timeout=0.5))
 
     def test_manual_ack_mode_no_manual_ack(self):
         consume_ok = threading.Event()
@@ -351,8 +352,7 @@ class IntegrationTest(unittest.TestCase):
 
         self.consumer.consume(
             ConsumeParams(on_msg),
-            queue_params=QueueParams("queue"),
-            manual_ack=True
+            queue_params=QueueParams("queue")
         )
         self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
 
@@ -363,6 +363,31 @@ class IntegrationTest(unittest.TestCase):
         msg.clear()
         self.consumer.restart()
         self.assertTrue(msg.wait(timeout=1.0))
+
+    def test_auto_ack_mode(self):
+        consume_ok = threading.Event()
+        message_received = threading.Event()
+
+        def on_msg(_body):  # noqa
+            if isinstance(_body, ConsumeOK):
+                consume_ok.set()
+            else:
+                message_received.set()
+
+        self.consumer.consume(
+            ConsumeParams(on_msg, auto_ack=True),
+            queue_params=QueueParams("queue")
+        )
+        self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
+        self.producer.publish(b"body", queue_params=QueueParams("queue"))
+        self.assertTrue(message_received.wait(timeout=2.0))  # await msg
+
+        # no ack happens, restart the connection and see the message pop again
+        consume_ok.clear()
+        message_received.clear()
+        self.consumer.restart()
+        self.assertTrue(consume_ok.wait(timeout=1.0))
+        self.assertFalse(message_received.wait(timeout=0.5))
 
     @classmethod
     def tearDownClass(cls) -> None:
