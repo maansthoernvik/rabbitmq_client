@@ -25,7 +25,7 @@ Here is an example:
 from rabbitmq_client import RMQConsumer, ConsumeParams, QueueParams
 
 
-def on_message(msg):
+def on_message(msg, ack=None):
     ...
 
 consumer = RMQConsumer()
@@ -45,11 +45,12 @@ delayed until it is. When a consume has been successfully started, the bound
 callback will receive a ``ConsumeOK`` object containing the resulting 
 consumer tag.
 
-### Manual ack mode
+### Acknowledging received messages
 
-By default, the consumer will automatically send a ``basic_ack`` for each consumed
-message. By passing the ``manual_ack`` kwarg to the ``consume`` interface 
-you can opt to manually acknowledge incoming messages:
+By default, received messages need to be acknowledged when received. By calling
+the ``ack`` kwarg function a message is acknowledged and won't be sent again.
+If a message isn't acknowledged using this function, it will be re-sent by
+RabbitMQ on consuming from a queue again.
 
 ```python
 from rabbitmq_client import RMQConsumer, ConsumeParams, QueueParams
@@ -66,16 +67,12 @@ def on_message(msg, ack=None):
 consumer = RMQConsumer()
 consumer.start()
 consumer.consume(ConsumeParams(on_message),
-                 queue_params=QueueParams("queue_name"),
-                 manual_ack=True)
+                 queue_params=QueueParams("queue_name"))
 ```
 
-Above is an example of how to enable manual ack mode. When manual ack mode is
-enabled, the ``on_message_callback`` parameter of the ``ConsumeParams`` object
-must accept the additional ``ack`` kwarg. The ``ack`` kwarg is a function
-which, when called, acknowledges the message which prompted the call to the
-``on_message_callback``. This leaves it up to the user to decide when to ack
-an incoming message.
+To enable automatic acknowledgement of messages, pass the ``auto_ack`` parameter
+to the ``ConsumeParams``, set to ``True``. If ``auto_ack`` is ``True``, the 
+``ack`` kwarg is unset.
 
 ## Producer
 `RMQProducer` extends the `RMQConnection` base class with two additional 
