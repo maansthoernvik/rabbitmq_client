@@ -60,12 +60,7 @@ class TestConsumeKeyGeneration(unittest.TestCase):
         )
 
 
-# noinspection DuplicatedCode
-class TestConsumer(unittest.TestCase):
-    """
-    Test the new (2021) RMQConsumer class, verify its interface methods can be
-    used as advertised and in different combinations.
-    """
+class TestConsumeInterface(unittest.TestCase):
 
     @patch("rabbitmq_client.consumer.RMQConnection.start")
     def setUp(self, _connection_start) -> None:
@@ -90,20 +85,6 @@ class TestConsumer(unittest.TestCase):
 
         return "123"
 
-    def test_consumer_readiness(self):
-        """Verify the consumer's ready property changes as expected."""
-        self.assertTrue(self.consumer.ready)
-        self.consumer.on_close()
-        self.assertFalse(self.consumer.ready)
-        self.consumer.on_ready()
-        self.assertTrue(self.consumer.ready)
-        self.consumer.on_close(permanent=True)
-        self.assertFalse(self.consumer.ready)
-
-    def test_consumer_error_handling(self):
-        """Verify on_error results in correct behavior..."""
-        with self.assertRaises(NotImplementedError):
-            self.consumer.on_error()
 
     def test_consume_exchange_only(self):
         """Verify possibility to consume from an exchange."""
@@ -200,6 +181,76 @@ class TestConsumer(unittest.TestCase):
         self.assertEqual(consume_instance.exchange_params, exchange)
         self.assertEqual(consume_instance.routing_key, "routing_key")
         self.consumer.declare_queue.assert_called_with(queue, callback=ANY)
+
+
+    def test_consume_neither_queue_nor_exchange_provided(self):
+        """
+        Verify that consume raises an exception if neither queue nor exchange
+        is provided.
+        """
+        with self.assertRaises(ValueError):
+            self.consumer.consume(ConsumeParams(lambda _: ...))
+
+    def test_consume_same_consume_key(self):
+        """
+        Verify that calling consume once more with the same queue name,
+        exchange name and routing key will result in an exception.
+        """
+        self.consumer.consume(
+            ConsumeParams(lambda _: ...), QueueParams("queue")
+        )
+
+        # Assertions
+        with self.assertRaises(ValueError):
+            self.consumer.consume(
+                ConsumeParams(lambda _: ...), QueueParams("queue")
+            )
+
+
+# noinspection DuplicatedCode
+class TestConsumer(unittest.TestCase):
+    """
+    Test the new (2021) RMQConsumer class, verify its interface methods can be
+    used as advertised and in different combinations.
+    """
+
+    @patch("rabbitmq_client.consumer.RMQConnection.start")
+    def setUp(self, _connection_start) -> None:
+        """Setup to run before each test case."""
+        self.consumer = RMQConsumer()
+        self.consumer.start()
+        self.consumer.on_ready()  # Fake connection getting ready
+
+        self.consumer.declare_queue = Mock()
+        self.consumer.declare_exchange = Mock()
+        self.consumer.bind_queue = Mock()
+        self.consumer.basic_consume = Mock()
+
+    def set_up_confirmed_consume(self, auto_ack=False) -> str:
+        """Helper that sets up queue-only confirmed consume."""
+        queue_params = QueueParams("queue")
+        self.consumer.consume(ConsumeParams(lambda _: ..., auto_ack=auto_ack),
+                              queue_params=queue_params)
+        frame_mock = Mock()
+        frame_mock.method.consumer_tag = "123"
+        self.consumer.on_consume_ok(frame_mock, queue_params=queue_params)
+
+        return "123"
+
+    def test_consumer_readiness(self):
+        """Verify the consumer's ready property changes as expected."""
+        self.assertTrue(self.consumer.ready)
+        self.consumer.on_close()
+        self.assertFalse(self.consumer.ready)
+        self.consumer.on_ready()
+        self.assertTrue(self.consumer.ready)
+        self.consumer.on_close(permanent=True)
+        self.assertFalse(self.consumer.ready)
+
+    def test_consumer_error_handling(self):
+        """Verify on_error results in correct behavior..."""
+        with self.assertRaises(NotImplementedError):
+            self.consumer.on_error()
 
     def test_on_queue_declared_no_exchange(self):
         """
@@ -442,29 +493,6 @@ class TestConsumer(unittest.TestCase):
 
         # Run test, assertion is that no exception is uncaught
         self.consumer.on_msg(Mock(), deliver_mock, Mock(), b"body")
-
-    def test_consume_neither_queue_nor_exchange_provided(self):
-        """
-        Verify that consume raises an exception if neither queue nor exchange
-        is provided.
-        """
-        with self.assertRaises(ValueError):
-            self.consumer.consume(ConsumeParams(lambda _: ...))
-
-    def test_consume_same_consume_key(self):
-        """
-        Verify that calling consume once more with the same queue name,
-        exchange name and routing key will result in an exception.
-        """
-        self.consumer.consume(
-            ConsumeParams(lambda _: ...), QueueParams("queue")
-        )
-
-        # Assertions
-        with self.assertRaises(ValueError):
-            self.consumer.consume(
-                ConsumeParams(lambda _: ...), QueueParams("queue")
-            )
 
     def test_on_close_marks_consumes_stopped(self):
         """Verify a call to on_close marks all consumes as stopped."""
