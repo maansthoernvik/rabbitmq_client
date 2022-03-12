@@ -209,6 +209,7 @@ class TestIntegration(unittest.TestCase):
 
         def on_msg(msg):
             event.set()
+            print(msg)
 
             nonlocal msg_received
             msg_received = msg
@@ -227,10 +228,11 @@ class TestIntegration(unittest.TestCase):
 
         # Send a message and verify it is delivered OK
         event.clear()  # clear to re-use event
-        self.producer.publish(b"body", queue_params=QueueParams("queue"))
+        self.producer.publish(b"test_consume_from_queue",
+                              queue_params=QueueParams("queue"))
 
         event.wait(timeout=1.0)
-        self.assertEqual(msg_received, b"body")
+        self.assertEqual(msg_received, b"test_consume_from_queue")
 
     def test_consume_from_direct_exchange(self):
         """
@@ -259,12 +261,12 @@ class TestIntegration(unittest.TestCase):
 
         # Send a message and verify it is delivered OK
         event.clear()
-        self.producer.publish(b"body",
+        self.producer.publish(b"test_consume_from_direct_exchange",
                               exchange_params=ExchangeParams("exchange"),
                               routing_key="bla.bla")
 
         event.wait(timeout=1.0)
-        self.assertEqual(msg_received, b"body")
+        self.assertEqual(msg_received, b"test_consume_from_direct_exchange")
 
     def test_consume_from_fanout_exchange(self):
         """
@@ -294,12 +296,12 @@ class TestIntegration(unittest.TestCase):
         # Send a message and verify it is delivered OK
         event.clear()
         self.producer.publish(
-            b"body",
+            b"test_consume_from_fanout_exchange",
             exchange_params=ExchangeParams("exchange_fanout",
                                            exchange_type=ExchangeType.fanout))
 
         event.wait(timeout=1.0)
-        self.assertEqual(msg_received, b"body")
+        self.assertEqual(msg_received, b"test_consume_from_fanout_exchange")
 
     def test_consume_from_exchange_and_queue(self):
         """
@@ -331,12 +333,12 @@ class TestIntegration(unittest.TestCase):
         # Send a message and verify it is delivered OK
         event.clear()
         self.producer.publish(
-            b"body",
+            b"test_consume_from_exchange_and_queue",
             exchange_params=ExchangeParams("exchange_fanout",
                                            exchange_type=ExchangeType.fanout))
 
         event.wait(timeout=1.0)
-        self.assertEqual(msg_received, b"body")
+        self.assertEqual(msg_received, b"test_consume_from_exchange_and_queue")
 
     def test_consume_from_exchange_routing_key_and_queue(self):
         """
@@ -369,13 +371,14 @@ class TestIntegration(unittest.TestCase):
         # Send a message and verify it is delivered OK
         event.clear()
         self.producer.publish(
-            b"body",
+            b"test_consume_from_exchange_routing_key_and_queue",
             exchange_params=ExchangeParams("exchange_direct"),
             routing_key="fish"
         )
 
         event.wait(timeout=1.0)
-        self.assertEqual(msg_received, b"body")
+        self.assertEqual(msg_received,
+                         b"test_consume_from_exchange_routing_key_and_queue")
 
 
 class TestConfirmMode(unittest.TestCase):
