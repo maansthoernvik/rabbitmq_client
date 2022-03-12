@@ -76,7 +76,7 @@ class TestAcknowledgements(unittest.TestCase):
 
         self.consumer.consume(
             ConsumeParams(on_msg),
-            queue_params=QueueParams("queue")
+            queue_params=QueueParams("queue_man_ack")
         )
         self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
 
@@ -101,7 +101,7 @@ class TestAcknowledgements(unittest.TestCase):
 
         self.consumer.consume(
             ConsumeParams(on_msg),
-            queue_params=QueueParams("queue")
+            queue_params=QueueParams("queue_man_ack_no_ack")
         )
         self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
 
@@ -126,7 +126,7 @@ class TestAcknowledgements(unittest.TestCase):
 
         self.consumer.consume(
             ConsumeParams(on_msg, auto_ack=True),
-            queue_params=QueueParams("queue")
+            queue_params=QueueParams("queue_auto_ack")
         )
         self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
         self.producer.publish(b"test_auto_ack_mode",
