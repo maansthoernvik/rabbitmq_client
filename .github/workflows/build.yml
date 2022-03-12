@@ -65,6 +65,6 @@ jobs:
           tests.test_connection \
           tests.test_consumer \
           tests.test_producer \
-          tests.test_integration -f
+          tests.test_integration -f -v
         coverage report -m --fail-under 96
     # TODO: Add integration tests
