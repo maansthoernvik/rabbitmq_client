@@ -74,18 +74,6 @@ class TestConsumeInterface(unittest.TestCase):
         self.consumer.bind_queue = Mock()
         self.consumer.basic_consume = Mock()
 
-    def set_up_confirmed_consume(self, auto_ack=False) -> str:
-        """Helper that sets up queue-only confirmed consume."""
-        queue_params = QueueParams("queue")
-        self.consumer.consume(ConsumeParams(lambda _: ..., auto_ack=auto_ack),
-                              queue_params=queue_params)
-        frame_mock = Mock()
-        frame_mock.method.consumer_tag = "123"
-        self.consumer.on_consume_ok(frame_mock, queue_params=queue_params)
-
-        return "123"
-
-
     def test_consume_exchange_only(self):
         """Verify possibility to consume from an exchange."""
         # Prep
@@ -537,3 +525,104 @@ class TestConsumer(unittest.TestCase):
         self.consumer.on_msg(channel_mock, basic_deliver, Mock(), b"body")
 
         ack_mock.assert_called_with(delivery_tag=123)
+
+
+class TestCaching(unittest.TestCase):
+
+    @patch("rabbitmq_client.consumer.RMQConnection.start")
+    def setUp(self, _connection_start) -> None:
+        """Setup to run before each test case."""
+        self.consumer = RMQConsumer()
+        self.consumer.start()
+        self.consumer.on_ready()  # Fake connection getting ready
+
+        self.consumer.declare_queue = Mock()
+        self.consumer.declare_exchange = Mock()
+        self.consumer.bind_queue = Mock()
+        self.consumer.basic_consume = Mock()
+
+    def test_queue_cached(self):
+        consume_params = ConsumeParams(lambda msg: ...)
+        queue_params = QueueParams("queue")
+
+        # Signal queue has been declared
+        frame_mock = Mock()
+        frame_mock.method.queue = queue_params.queue
+        self.consumer.on_queue_declared(frame_mock,
+                                        consume_params=consume_params,
+                                        queue_params=queue_params)
+
+        # Consume and verify queue isn't declared
+        self.consumer.consume(consume_params,
+                              queue_params=queue_params,
+                              exchange_params=ExchangeParams("exchange"))
+
+        self.consumer.declare_queue.assert_not_called()
+
+    def test_exchange_cached(self):
+        consume_params = ConsumeParams(lambda msg: ...)
+        exchange_params = ExchangeParams("exchange")
+
+        # Signal exchange has been declared
+        self.consumer.on_exchange_declared(exchange_params,
+                                           Mock(),
+                                           consume_params=consume_params)
+
+        # Signal queue declared to verify it would not lead to a
+        # re-declaration of the exchange.
+        self.consumer.on_queue_declared(Mock(),
+                                        consume_params=consume_params,
+                                        exchange_params=exchange_params)
+
+        self.consumer.declare_exchange.assert_not_called()
+
+    def test_queue_cache_dropped_on_connection_closed(self):
+        consume_params = ConsumeParams(lambda msg: ...)
+        queue_params = QueueParams("queue")
+
+        # Signal queue has been declared
+        frame_mock = Mock()
+        frame_mock.method.queue = queue_params.queue
+        self.consumer.on_queue_declared(frame_mock,
+                                        consume_params=consume_params,
+                                        queue_params=queue_params)
+
+        # Consume and verify queue isn't declared
+        self.consumer.consume(consume_params,
+                              queue_params=queue_params,
+                              exchange_params=ExchangeParams("exchange"))
+
+        self.consumer.declare_queue.assert_not_called()
+
+        # Connection closed, cache should be dropped
+        self.consumer.on_close()
+
+        # on_ready triggers re-consume, should lead to de-declaration
+        self.consumer.on_ready()
+        self.consumer.declare_queue.assert_called()
+
+    def test_exchange_cache_dropped_on_connection_closed(self):
+        consume_params = ConsumeParams(lambda msg: ...)
+        exchange_params = ExchangeParams("exchange")
+
+        # Signal exchange has been declared
+        self.consumer.on_exchange_declared(exchange_params,
+                                           Mock(),
+                                           consume_params=consume_params)
+
+        # Signal queue declared to verify it would not lead to a
+        # re-declaration of the exchange.
+        self.consumer.on_queue_declared(Mock(),
+                                        consume_params=consume_params,
+                                        exchange_params=exchange_params)
+
+        self.consumer.declare_exchange.assert_not_called()
+
+        # Connection closed, cache should be dropped
+        self.consumer.on_close()
+
+        # on_queue_declared triggers re-declare
+        self.consumer.on_queue_declared(Mock(),
+                                        consume_params=consume_params,
+                                        exchange_params=exchange_params)
+        self.consumer.declare_exchange.assert_called()

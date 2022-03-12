@@ -1,22 +1,22 @@
 import functools
 import logging
 
-from rabbitmq_client.defs import QueueParams, QueueBindParams, ConsumeOK
+from rabbitmq_client.defs import (
+    QueueParams,
+    QueueBindParams,
+    ConsumeOK,
+    ConsumeParams,
+    ExchangeParams
+)
 from rabbitmq_client.connection import RMQConnection
 
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _gen_consume_key(queue=None,
-                     exchange=None,
-                     routing_key=None):
-    """
-    :param queue: str
-    :param exchange: str
-    :param routing_key: str
-    :return: str
-    """
+def _gen_consume_key(queue: str = None,
+                     exchange: str = None,
+                     routing_key: str = None) -> str:
     key_list = []
     key_list.append(queue) if queue else ""
     key_list.append(exchange) if exchange else ""
@@ -84,6 +84,9 @@ class RMQConsumer(RMQConnection):
 
         self._ready = False
         self._consumes = dict()
+
+        self._declared_queues = set()
+        self._declared_exchanges = set()
 
     @property
     def ready(self):
@@ -209,7 +212,14 @@ class RMQConsumer(RMQConnection):
                                exchange_params=exchange_params,
                                routing_key=routing_key)
 
-        self.declare_queue(queue_params, callback=cb)
+        if queue_params.queue in self._declared_queues:
+            self.check_declare_exchange(consume_params,
+                                        queue_params,
+                                        exchange_params,
+                                        routing_key)
+
+        else:
+            self.declare_queue(queue_params, callback=cb)
 
     def on_queue_declared(self,
                           frame,
@@ -226,11 +236,26 @@ class RMQConsumer(RMQConnection):
         """
         LOGGER.info(f"declared queue: {frame.method.queue}")
 
+        self._declared_queues.add(frame.method.queue)
+
         # Update the consume queue name to ensure it is set to the created
         # queue's name
         consume_params.queue = frame.method.queue
 
-        if exchange_params is not None:
+        self.check_declare_exchange(consume_params,
+                                    queue_params,
+                                    exchange_params,
+                                    routing_key)
+
+    def check_declare_exchange(self,
+                               consume_params: ConsumeParams,
+                               queue_params: QueueParams,
+                               exchange_params: ExchangeParams,
+                               routing_key: str):
+        if (
+                exchange_params is not None and
+                exchange_params.exchange not in self._declared_exchanges
+        ):
 
             cb = functools.partial(self.on_exchange_declared,
                                    exchange_params,
@@ -262,6 +287,8 @@ class RMQConsumer(RMQConnection):
         :param routing_key: str
         """
         LOGGER.info(f"declared exchange: {exchange_params.exchange}")
+
+        self._declared_exchanges.add(exchange_params.exchange)
 
         cb = functools.partial(self.on_queue_bound,
                                consume_params=consume_params,
@@ -384,12 +411,17 @@ class RMQConsumer(RMQConnection):
 
         :param permanent: bool
         """
-        if permanent:
+        if not self._closing and permanent:
             LOGGER.critical("consumer connection permanently closed")
         else:
             LOGGER.info("consumer connection closed")
 
         self._ready = False
+
+        # Reset cached declarations, no way of knowing what's still around
+        # after a restart.
+        self._declared_queues = set()
+        self._declared_exchanges = set()
 
         old_consumer_tags = list()
         for _key, consume in self._consumes.items():

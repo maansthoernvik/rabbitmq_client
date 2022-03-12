@@ -401,3 +401,27 @@ class TestConfirmMode(unittest.TestCase):
         self.producer.on_confirm_select_ok(Mock())
         self.producer.declare_exchange.assert_called()
         self.assertEqual(len(self.producer._buffered_messages), 0)
+
+
+class TestCaching(unittest.TestCase):
+
+    @patch("rabbitmq_client.consumer.RMQConnection.start")
+    def setUp(self, _connection_start) -> None:
+        """Setup to run before each test case."""
+        self.producer = RMQProducer()
+        self.producer.start()
+        self.producer.on_ready()  # Fake connection getting ready
+
+        self.producer.declare_queue = Mock()
+        self.producer.declare_exchange = Mock()
+        self.producer.bind_queue = Mock()
+        self.producer.basic_consume = Mock()
+
+    def test_queue_cached(self):
+        pass
+
+    def test_exchange_cached(self):
+        pass
+
+    def test_cache_dropped_on_connection_closed(self):
+        pass
