@@ -170,7 +170,6 @@ class TestConsumeInterface(unittest.TestCase):
         self.assertEqual(consume_instance.routing_key, "routing_key")
         self.consumer.declare_queue.assert_called_with(queue, callback=ANY)
 
-
     def test_consume_neither_queue_nor_exchange_provided(self):
         """
         Verify that consume raises an exception if neither queue nor exchange
