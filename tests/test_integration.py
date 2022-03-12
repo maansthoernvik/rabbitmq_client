@@ -212,7 +212,6 @@ class TestIntegration(unittest.TestCase):
 
         def on_msg(msg):
             event.set()
-            print(msg)
 
             nonlocal msg_received
             msg_received = msg

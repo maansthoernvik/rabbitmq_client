@@ -49,4 +49,10 @@ jobs:
 
     - name: Run unit tests
       run: |
-        python -m unittest tests.test_integration.test_consume_from_queue -f -v
+        coverage run --source rabbitmq_client -m unittest \
+          tests.test_connection \
+          tests.test_consumer \
+          tests.test_producer \
+          tests.test_integration -f -v
+        coverage report -m --fail-under 96
+
