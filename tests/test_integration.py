@@ -220,7 +220,9 @@ class TestIntegration(unittest.TestCase):
         self.assertEqual(consume_key, "queue")
 
         # Wait for ConsumeOK
-        event.wait(timeout=1.0)
+        print(time.time())
+        event.wait(timeout=2.0)
+        print(time.time())
         self.assertTrue(isinstance(msg_received, ConsumeOK))
 
         # Send a message and verify it is delivered OK
