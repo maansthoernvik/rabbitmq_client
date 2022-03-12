@@ -1,11 +1,7 @@
-name: Build
+name: Test
 
 on:
   workflow_dispatch:
-  pull_request:
-  push:
-    branches:
-      - master
 
 jobs:
   build:
@@ -48,22 +44,9 @@ jobs:
         echo $PYTHONPATH
 
     #
-    # Lint
-    #
-
-    - name: Lint Python code with flake8
-      run: |
-        flake8 `find . -name "*.py"`
-
-    #
     # Run tests
     #
 
     - name: Run unit tests
       run: |
-        coverage run --source rabbitmq_client -m unittest \
-          tests.test_connection \
-          tests.test_consumer \
-          tests.test_producer \
-          tests.test_integration -f -v
-        coverage report -m --fail-under 96
+        python -m unittest tests.test_integration.test_consume_from_queue -f -v
