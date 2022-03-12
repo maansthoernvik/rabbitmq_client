@@ -80,7 +80,8 @@ class TestAcknowledgements(unittest.TestCase):
         )
         self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
 
-        self.producer.publish(b"body", queue_params=QueueParams("queue"))
+        self.producer.publish(b"test_manual_ack_mode",
+                              queue_params=QueueParams("queue_man_ack"))
         self.assertTrue(msg.wait(timeout=2.0))  # await msg
 
         # ack has been done, consumed messages should not be re-sent
@@ -104,7 +105,8 @@ class TestAcknowledgements(unittest.TestCase):
         )
         self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
 
-        self.producer.publish(b"body", queue_params=QueueParams("queue"))
+        self.producer.publish(b"test_manual_ack_mode_no_manual_ack",
+                              queue_params=QueueParams("queue_man_ack_no_ack"))
         self.assertTrue(msg.wait(timeout=2.0))  # await msg
 
         # no ack happens, restart the connection and see the message pop again
@@ -127,7 +129,8 @@ class TestAcknowledgements(unittest.TestCase):
             queue_params=QueueParams("queue")
         )
         self.assertTrue(consume_ok.wait(timeout=2.0))  # await consume OK
-        self.producer.publish(b"body", queue_params=QueueParams("queue"))
+        self.producer.publish(b"test_auto_ack_mode",
+                              queue_params=QueueParams("queue_auto_ack"))
         self.assertTrue(message_received.wait(timeout=2.0))  # await msg
 
         # no ack happens, restart the connection and see the message pop again
@@ -221,9 +224,7 @@ class TestIntegration(unittest.TestCase):
         self.assertEqual(consume_key, "queue")
 
         # Wait for ConsumeOK
-        print(time.time())
         event.wait(timeout=2.0)
-        print(time.time())
         self.assertTrue(isinstance(msg_received, ConsumeOK))
 
         # Send a message and verify it is delivered OK
