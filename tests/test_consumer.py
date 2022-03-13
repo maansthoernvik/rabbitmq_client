@@ -575,6 +575,25 @@ class TestCaching(unittest.TestCase):
 
         self.consumer.declare_exchange.assert_not_called()
 
+    def test_queue_binding_when_exchange_already_declared(self):
+        consume_params = ConsumeParams(lambda msg: ...)
+        exchange_params = ExchangeParams("exchange")
+        queue_params = QueueParams("queue")
+
+        self.consumer.on_exchange_declared(exchange_params,
+                                           Mock(),
+                                           consume_params=consume_params)
+        self.consumer.bind_queue.reset_mock()
+
+        # Now check declare exchange and see that queue binding is done
+        self.consumer.check_declare_exchange(consume_params,
+                                             queue_params,
+                                             exchange_params,
+                                             "")
+
+        self.consumer.declare_exchange.assert_not_called()
+        self.consumer.bind_queue.assert_called()
+
     def test_queue_cache_dropped_on_connection_closed(self):
         consume_params = ConsumeParams(lambda msg: ...)
         queue_params = QueueParams("queue")

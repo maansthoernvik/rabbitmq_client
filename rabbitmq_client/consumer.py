@@ -1,3 +1,5 @@
+from typing import Union
+
 import functools
 import logging
 
@@ -206,12 +208,6 @@ class RMQConsumer(RMQConnection):
         if queue_params is None:
             queue_params = QueueParams("", exclusive=True)
 
-        cb = functools.partial(self.on_queue_declared,
-                               consume_params=consume_params,
-                               queue_params=queue_params,
-                               exchange_params=exchange_params,
-                               routing_key=routing_key)
-
         if queue_params.queue in self._declared_queues:
             self.check_declare_exchange(consume_params,
                                         queue_params,
@@ -219,6 +215,12 @@ class RMQConsumer(RMQConnection):
                                         routing_key)
 
         else:
+            cb = functools.partial(self.on_queue_declared,
+                                   consume_params=consume_params,
+                                   queue_params=queue_params,
+                                   exchange_params=exchange_params,
+                                   routing_key=routing_key)
+
             self.declare_queue(queue_params, callback=cb)
 
     def on_queue_declared(self,
@@ -250,13 +252,18 @@ class RMQConsumer(RMQConnection):
     def check_declare_exchange(self,
                                consume_params: ConsumeParams,
                                queue_params: QueueParams,
-                               exchange_params: ExchangeParams,
+                               exchange_params: Union[ExchangeParams, None],
                                routing_key: str):
         if (
                 exchange_params is not None and
-                exchange_params.exchange not in self._declared_exchanges
+                exchange_params.exchange in self._declared_exchanges
         ):
+            self.handle_queue_binding(consume_params,
+                                      queue_params,
+                                      exchange_params,
+                                      routing_key)
 
+        elif exchange_params is not None:
             cb = functools.partial(self.on_exchange_declared,
                                    exchange_params,
                                    consume_params=consume_params,
@@ -290,6 +297,16 @@ class RMQConsumer(RMQConnection):
 
         self._declared_exchanges.add(exchange_params.exchange)
 
+        self.handle_queue_binding(consume_params,
+                                  queue_params,
+                                  exchange_params,
+                                  routing_key)
+
+    def handle_queue_binding(self,
+                             consume_params: ConsumeParams,
+                             queue_params: QueueParams,
+                             exchange_params: ExchangeParams,
+                             routing_key: str):
         cb = functools.partial(self.on_queue_bound,
                                consume_params=consume_params,
                                queue_params=queue_params,
