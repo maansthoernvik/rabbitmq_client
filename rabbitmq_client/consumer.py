@@ -16,9 +16,9 @@ from rabbitmq_client.connection import RMQConnection
 LOGGER = logging.getLogger(__name__)
 
 
-def _gen_consume_key(queue: str = None,
-                     exchange: str = None,
-                     routing_key: str = None) -> str:
+def _gen_consume_key(queue: str = "",
+                     exchange: str = "",
+                     routing_key: str = "") -> str:
     key_list = []
     key_list.append(queue) if queue else ""
     key_list.append(exchange) if exchange else ""
@@ -170,9 +170,9 @@ class RMQConsumer(RMQConnection):
             )
 
         consume_key = _gen_consume_key(
-            queue_params.queue if queue_params else "",
-            exchange_params.exchange if exchange_params else "",
-            routing_key
+            queue=queue_params.queue if queue_params else "",
+            exchange=exchange_params.exchange if exchange_params else "",
+            routing_key=routing_key
         )
         if self._consumes.get(consume_key) is not None:
             raise ValueError(
@@ -209,6 +209,8 @@ class RMQConsumer(RMQConnection):
             queue_params = QueueParams("", exclusive=True)
 
         if queue_params.queue in self._declared_queues:
+            consume_params.queue = queue_params.queue
+
             self.check_declare_exchange(consume_params,
                                         queue_params,
                                         exchange_params,
@@ -384,6 +386,9 @@ class RMQConsumer(RMQConnection):
         :param _basic_properties: pika.spec.Basic.Properties
         :param body: bytes
         """
+        LOGGER.debug(f"received message: {body}")
+        print("ctag: ", basic_deliver.consumer_tag)
+
         consume = self._consumes[basic_deliver.consumer_tag]
 
         try:

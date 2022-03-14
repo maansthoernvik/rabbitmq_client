@@ -382,7 +382,7 @@ class RMQProducer(RMQConnection):
 
         :param permanent: bool
         """
-        if permanent:
+        if not self._closing and permanent:
             LOGGER.critical("producer connection permanently closed")
         else:
             LOGGER.info("producer connection closed")

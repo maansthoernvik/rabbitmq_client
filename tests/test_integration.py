@@ -1,3 +1,5 @@
+import logging
+
 import threading
 import time
 import unittest
@@ -58,9 +60,24 @@ class TestAcknowledgements(unittest.TestCase):
         client.start()
         assert started(client)
 
-        client._channel.queue_purge("queue_fanout_receiver")
-        client._channel.queue_purge("queue")
+        purge_confirmation = threading.Event()
+        purges = 0
 
+        def purge_confirmed(*args, **kwargs):
+            nonlocal purges
+            purges += 1
+
+            if purges == 3:
+                purge_confirmation.set()
+
+        client._channel.queue_purge("queue_man_ack",
+                                    callback=purge_confirmed)
+        client._channel.queue_purge("queue_man_ack_no_ack",
+                                    callback=purge_confirmed)
+        client._channel.queue_purge("queue_auto_ack",
+                                    callback=purge_confirmed)
+
+        purge_confirmation.wait(timeout=2.0)
         client.stop()
 
     def test_manual_ack_mode(self):
@@ -176,9 +193,24 @@ class TestIntegration(unittest.TestCase):
         client.start()
         assert started(client)
 
-        client._channel.queue_purge("queue_fanout_receiver")
-        client._channel.queue_purge("queue")
+        purge_confirmation = threading.Event()
+        purges = 0
 
+        def purge_confirmed(*args, **kwargs):
+            nonlocal purges
+            purges += 1
+
+            if purges == 3:
+                purge_confirmation.set()
+
+        client._channel.queue_purge("queue_fanout_receiver",
+                                    callback=purge_confirmed)
+        client._channel.queue_purge("queue_direct_receiver",
+                                    callback=purge_confirmed)
+        client._channel.queue_purge("queue",
+                                    callback=purge_confirmed)
+
+        purge_confirmation.wait(timeout=2.0)
         client.stop()
 
     def test_stop_consumer(self):
@@ -410,9 +442,22 @@ class TestConfirmMode(unittest.TestCase):
         client.start()
         assert started(client)
 
-        client._channel.queue_purge("queue_fanout_receiver")
-        client._channel.queue_purge("queue")
+        purge_confirmation = threading.Event()
+        purges = 0
 
+        def purge_confirmed(*args, **kwargs):
+            nonlocal purges
+            purges += 1
+
+            if purges == 2:
+                purge_confirmation.set()
+
+        client._channel.queue_purge("queue_fanout_receiver",
+                                    callback=purge_confirmed)
+        client._channel.queue_purge("queue",
+                                    callback=purge_confirmed)
+
+        purge_confirmation.wait(timeout=2.0)
         client.stop()
 
     def test_confirm_mode(self):
@@ -494,3 +539,160 @@ class TestConfirmMode(unittest.TestCase):
 
         # Stop the extra producer
         producer.stop()
+
+
+class TestCaching(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.consumer = RMQConsumer()
+        self.consumer.start()
+        self.assertTrue(started(self.consumer))
+
+        self.producer = RMQProducer()
+        self.producer.start()
+        self.assertTrue(started(self.producer))
+
+    def tearDown(self) -> None:
+        self.consumer.stop()
+        self.producer.stop()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """
+        Need general teardown since not wanting to introduce waits part of
+        test cases. Need to purge queues as consumer/producers are stopped
+        before acking messages, sometimes.
+
+        This teardown enabled re-testability without getting messages sent by
+        a previous run.
+        """
+        client = RMQConsumer()
+        client.start()
+        assert started(client)
+
+        purge_confirmation = threading.Event()
+
+        def purge_confirmed(*args, **kwargs):
+            purge_confirmation.set()
+
+        client._channel.queue_purge("cached_queue",
+                                    callback=purge_confirmed)
+
+        purge_confirmation.wait(timeout=2.0)
+        client.stop()
+
+    def test_caching(self):
+        """
+        Verify caching does not interfere with consume flows (primarily) and
+        that messages are routed to callbacks as expected.
+        """
+        #
+        # Set up queue consume
+        queue_callback_event = threading.Event()
+        queue_message = b""
+
+        def queue_callback(msg, ack=None):
+            if isinstance(msg, ConsumeOK):
+                print("ctag:", msg.consumer_tag)
+            nonlocal queue_message
+            queue_message = msg
+            queue_callback_event.set()
+
+        queue_consume_params = ConsumeParams(queue_callback,
+                                             auto_ack=True)
+        queue_params = QueueParams("cached_queue")
+
+        self.consumer.consume(queue_consume_params, queue_params=queue_params)
+        self.assertTrue(queue_callback_event.wait(timeout=2.0))
+        self.assertTrue(isinstance(queue_message, ConsumeOK))
+
+        # Clear the event and publish to the queue
+        queue_callback_event.clear()
+        self.producer.publish(b"queue_message", queue_params=queue_params)
+
+        # Verify message reception
+        self.assertTrue(queue_callback_event.wait(timeout=2.0))
+        self.assertEqual(queue_message, b"queue_message")
+
+        #
+        # Set up exchange consume
+        exchange_callback_event = threading.Event()
+        exchange_message = b""
+
+        def exchange_callback(msg, ack=None):
+            nonlocal exchange_message
+            exchange_message = msg
+            exchange_callback_event.set()
+
+        exchange_consume_params = ConsumeParams(exchange_callback,
+                                                auto_ack=True)
+        direct_exchange_params = ExchangeParams("cached_exchange")
+
+        self.consumer.consume(exchange_consume_params,
+                              exchange_params=direct_exchange_params,
+                              routing_key="rk")
+        self.assertTrue(exchange_callback_event.wait(timeout=1.0))
+        self.assertTrue(isinstance(exchange_message, ConsumeOK))
+
+        # Clear the event and publish to the exchange
+        exchange_callback_event.clear()
+        self.producer.publish(b"exchange_message",
+                              exchange_params=direct_exchange_params,
+                              routing_key="rk")
+
+        # Verify message reception
+        self.assertTrue(exchange_callback_event.wait(timeout=1.0))
+        self.assertEqual(exchange_message, b"exchange_message")
+
+        #
+        # Consume from same exchange but different routing key
+        second_exchange_callback_event = threading.Event()
+        second_exchange_message = b""
+
+        def second_exchange_callback(msg, ack=None):
+            nonlocal second_exchange_message
+            second_exchange_message = msg
+            second_exchange_callback_event.set()
+
+        second_exchange_consume_params = ConsumeParams(
+            second_exchange_callback, auto_ack=True
+        )
+
+        self.consumer.consume(second_exchange_consume_params,
+                              exchange_params=direct_exchange_params,
+                              routing_key="other_rk")
+        self.assertTrue(second_exchange_callback_event.wait(timeout=1.0))
+        self.assertTrue(isinstance(second_exchange_message, ConsumeOK))
+
+        # Clear the event and publish to the exchange
+        second_exchange_callback_event.clear()
+        self.producer.publish(b"second_exchange_message",
+                              exchange_params=direct_exchange_params,
+                              routing_key="other_rk")
+
+        # Verify message reception
+        self.assertTrue(second_exchange_callback_event.wait(timeout=1.0))
+        self.assertEqual(second_exchange_message, b"second_exchange_message")
+
+        #
+        # Consume from other exchange but same queue
+        fanout_exchange_params = ExchangeParams(
+            "fanout_exchange", exchange_type=ExchangeType.fanout
+        )
+        queue_consume_params.consumer_tag = "newctag"
+
+        queue_callback_event.clear()
+        self.consumer.consume(queue_consume_params,
+                              queue_params=queue_params,
+                              exchange_params=fanout_exchange_params)
+        self.assertTrue(queue_callback_event.wait(timeout=1.0))
+        self.assertTrue(isinstance(queue_message, ConsumeOK))
+
+        # Clear the event and publish to the exchange
+        queue_callback_event.clear()
+        self.producer.publish(b"fanout_exchange_message",
+                              exchange_params=fanout_exchange_params)
+
+        # Verify message reception
+        self.assertTrue(queue_callback_event.wait(timeout=1.0))
+        self.assertEqual(queue_message, b"fanout_exchange_message")
