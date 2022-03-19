@@ -3,6 +3,8 @@ import unittest
 
 from unittest.mock import patch, Mock, ANY, call
 
+from pika.exchange_type import ExchangeType
+
 from rabbitmq_client import (
     ExchangeParams,
     ConsumeParams,
@@ -80,7 +82,8 @@ class TestConsumeInterface(unittest.TestCase):
         # Prep
         def on_msg(): pass
         consume = ConsumeParams(on_msg)
-        exchange = ExchangeParams("exchange")
+        exchange = ExchangeParams("exchange",
+                                  exchange_type=ExchangeType.fanout)
 
         # Run test
         self.consumer.consume(consume, exchange_params=exchange)
@@ -127,7 +130,8 @@ class TestConsumeInterface(unittest.TestCase):
         def on_msg(): pass
         consume = ConsumeParams(on_msg)
         queue = QueueParams("queue")
-        exchange = ExchangeParams("exchange")
+        exchange = ExchangeParams("exchange",
+                                  exchange_type=ExchangeType.fanout)
 
         # Run test
         self.consumer.consume(
@@ -376,7 +380,8 @@ class TestConsumer(unittest.TestCase):
         self.consumer._handle_consume = Mock()
 
         queue_params = QueueParams("queue")
-        exchange_params = ExchangeParams("exchange")
+        exchange_params = ExchangeParams("exchange",
+                                         exchange_type=ExchangeType.fanout)
 
         self.consumer.consume(ConsumeParams(lambda _: ...),
                               queue_params=queue_params)
@@ -489,7 +494,8 @@ class TestConsumer(unittest.TestCase):
         self.consumer.consume(queue_consume, queue_params=queue)
 
         exchange_consume = ConsumeParams(lambda _: ...)
-        exchange = ExchangeParams("exchange")
+        exchange = ExchangeParams("exchange",
+                                  exchange_type=ExchangeType.fanout)
         self.consumer.consume(exchange_consume, exchange_params=exchange)
 
         # Fake having all consumes started
@@ -555,7 +561,9 @@ class TestCaching(unittest.TestCase):
         # Consume and verify queue isn't declared
         self.consumer.consume(consume_params,
                               queue_params=queue_params,
-                              exchange_params=ExchangeParams("exchange"))
+                              exchange_params=ExchangeParams(
+                                  "exchange",
+                                  exchange_type=ExchangeType.fanout))
 
         self.consumer.declare_queue.assert_not_called()
 
@@ -607,7 +615,8 @@ class TestCaching(unittest.TestCase):
 
         consume_params = ConsumeParams(on_msg)
         queue_params = QueueParams("queue")
-        exchange_params = ExchangeParams("exchange")
+        exchange_params = ExchangeParams("exchange",
+                                         exchange_type=ExchangeType.fanout)
 
         # Signal queue has been declared and consume OK
         self.consumer.consume(consume_params,
@@ -660,9 +669,13 @@ class TestCaching(unittest.TestCase):
                                         queue_params=queue_params)
 
         # Consume and verify queue isn't declared
-        self.consumer.consume(consume_params,
-                              queue_params=queue_params,
-                              exchange_params=ExchangeParams("exchange"))
+        self.consumer.consume(
+            consume_params,
+            queue_params=queue_params,
+            exchange_params=ExchangeParams(
+                "exchange", exchange_type=ExchangeType.fanout
+            )
+        )
 
         self.consumer.declare_queue.assert_not_called()
 
