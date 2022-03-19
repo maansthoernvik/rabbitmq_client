@@ -1,3 +1,4 @@
+from pika.exchange_type import ExchangeType
 from typing import Union
 
 import functools
@@ -179,6 +180,15 @@ class RMQConsumer(RMQConnection):
             raise ValueError(
                 "That combination of queue + exchange + routing key is "
                 "already consumed from."
+            )
+
+        if (
+                exchange_params is not None and
+                exchange_params.exchange_type is ExchangeType.direct and
+                not routing_key
+        ):
+            raise ValueError(
+                "Direct exchanges must have a routing key set."
             )
 
         # 2. Update consumer instance

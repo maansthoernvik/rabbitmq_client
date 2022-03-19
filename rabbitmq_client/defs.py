@@ -145,6 +145,9 @@ class ConsumeOK:
         """
         self.consumer_tag = consumer_tag
 
+    def __str__(self):
+        return f"<ConsumeOK consumer_tag: '{self.consumer_tag}'>"
+
 
 class ConfirmModeOK:
     pass
