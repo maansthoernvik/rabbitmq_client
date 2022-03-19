@@ -89,6 +89,7 @@ class RMQConsumer(RMQConnection):
 
         self._declared_queues = set()
         self._declared_exchanges = set()
+        self._consumed_queues = dict()
 
     @property
     def ready(self):
@@ -243,7 +244,7 @@ class RMQConsumer(RMQConnection):
         self._declared_queues.add(frame.method.queue)
 
         # Update the consume queue name to ensure it is set to the created
-        # queue's name
+        # queue's name in case of automatic name generation.
         consume_params.queue = frame.method.queue
 
         self.check_declare_exchange(consume_params,
@@ -275,6 +276,15 @@ class RMQConsumer(RMQConnection):
             self.declare_exchange(exchange_params, callback=cb)
 
         else:
+            ctag = self.ongoing_consume(consume_params.queue)
+            if ctag is not None:
+                LOGGER.info("queue is already consumed from")
+                # Notify of ongoing consumer tag.
+                consume_params.on_message_callback(ConsumeOK(ctag))
+                # No need to consume again since the queue is already consumed
+                # from.
+                return
+
             cb = functools.partial(self.on_consume_ok,
                                    queue_params=queue_params)
 
@@ -336,6 +346,15 @@ class RMQConsumer(RMQConnection):
         LOGGER.info(f"queue {consume_params.queue} bound to exchange "
                     f"{exchange}")
 
+        ctag = self.ongoing_consume(consume_params.queue)
+        if ctag is not None:
+            LOGGER.info("queue is already consumed from")
+            # Notify of ongoing consumer tag.
+            consume_params.on_message_callback(ConsumeOK(ctag))
+            # No need to consume again since the queue is already consumed
+            # from.
+            return
+
         cb = functools.partial(self.on_consume_ok,
                                queue_params=queue_params,
                                exchange=exchange,
@@ -344,6 +363,9 @@ class RMQConsumer(RMQConnection):
         self.basic_consume(consume_params,
                            on_message_callback_override=self.on_msg,
                            callback=cb)
+
+    def ongoing_consume(self, queue: str) -> Union[str, None]:
+        return self._consumed_queues.get(queue)
 
     def on_consume_ok(self,
                       frame,
@@ -366,6 +388,10 @@ class RMQConsumer(RMQConnection):
         # Update with real consumer tag, may or may not be the same tag.
         consume_instance.consumer_tag = frame.method.consumer_tag
 
+        self._consumed_queues[consume_instance.consume_params.queue] = (
+            consume_instance.consumer_tag
+        )
+
         # Enables lookup via consumer tag in 'on_msg'. These entries are
         # removed 'on_close' since the consumer tags may be refreshed on
         # reconnecting.
@@ -387,7 +413,6 @@ class RMQConsumer(RMQConnection):
         :param body: bytes
         """
         LOGGER.debug(f"received message: {body}")
-        print("ctag: ", basic_deliver.consumer_tag)
 
         consume = self._consumes[basic_deliver.consumer_tag]
 
@@ -444,6 +469,7 @@ class RMQConsumer(RMQConnection):
         # after a restart.
         self._declared_queues = set()
         self._declared_exchanges = set()
+        self._consumed_queues = dict()
 
         old_consumer_tags = list()
         for _key, consume in self._consumes.items():

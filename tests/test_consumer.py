@@ -1,3 +1,5 @@
+import threading
+
 import unittest
 
 from unittest.mock import patch, Mock, ANY, call
@@ -593,6 +595,59 @@ class TestCaching(unittest.TestCase):
 
         self.consumer.declare_exchange.assert_not_called()
         self.consumer.bind_queue.assert_called()
+
+    def test_queue_already_consumed_from(self):
+        consume_ok = threading.Event()
+        ctag = "wrong"
+
+        def on_msg(m, a=None):
+            if isinstance(m, ConsumeOK):
+                consume_ok.set()
+                nonlocal ctag
+                ctag = m.consumer_tag
+
+        consume_params = ConsumeParams(on_msg)
+        queue_params = QueueParams("queue")
+        exchange_params = ExchangeParams("exchange")
+
+        # Signal queue has been declared and consume OK
+        self.consumer.consume(consume_params,
+                              queue_params=queue_params,
+                              exchange_params=exchange_params)
+        frame_mock = Mock()
+        frame_mock.method.queue = queue_params.queue
+        self.consumer.on_queue_declared(frame_mock,
+                                        consume_params=consume_params,
+                                        queue_params=queue_params,
+                                        exchange_params=exchange_params)
+        self.consumer.on_exchange_declared(exchange_params,
+                                           Mock(),
+                                           consume_params=consume_params,
+                                           queue_params=queue_params)
+        self.consumer.on_queue_bound(Mock(),
+                                     consume_params=consume_params,
+                                     queue_params=queue_params,
+                                     exchange=exchange_params.exchange)
+        self.consumer.basic_consume.assert_called()
+        frame_mock.method.consumer_tag = "ctag"
+        self.consumer.on_consume_ok(frame_mock,
+                                    queue_params=queue_params,
+                                    exchange=exchange_params.exchange)
+        self.assertTrue(consume_ok.wait())
+        self.assertEqual("ctag", ctag)
+
+        # Consume again and assume basic_consume isn't done again, but that the
+        # old callback received a ConsumeOK right away instead.
+        consume_ok.clear()
+        self.consumer.basic_consume.reset_mock()
+        ctag = "wrong"
+        self.consumer.consume(consume_params, queue_params=queue_params)
+
+        # The call should go right through immediately.
+        self.assertTrue(consume_ok.wait())
+        self.consumer.basic_consume.assert_not_called()
+        # This confirms the consume OK gotten contained the correct ctag.
+        self.assertEqual("ctag", ctag)
 
     def test_queue_cache_dropped_on_connection_closed(self):
         consume_params = ConsumeParams(lambda msg: ...)

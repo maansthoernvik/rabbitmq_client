@@ -1,5 +1,3 @@
-import logging
-
 import threading
 import time
 import unittest
@@ -592,8 +590,9 @@ class TestCaching(unittest.TestCase):
         queue_message = b""
 
         def queue_callback(msg, ack=None):
+            print("queue callback called: ", msg)
             if isinstance(msg, ConsumeOK):
-                print("ctag:", msg.consumer_tag)
+                print("consume OK ctag: ", msg.consumer_tag)
             nonlocal queue_message
             queue_message = msg
             queue_callback_event.set()
@@ -620,6 +619,9 @@ class TestCaching(unittest.TestCase):
         exchange_message = b""
 
         def exchange_callback(msg, ack=None):
+            print("exchange callback called: ", msg)
+            if isinstance(msg, ConsumeOK):
+                print("consume OK ctag: ", msg.consumer_tag)
             nonlocal exchange_message
             exchange_message = msg
             exchange_callback_event.set()
@@ -650,6 +652,9 @@ class TestCaching(unittest.TestCase):
         second_exchange_message = b""
 
         def second_exchange_callback(msg, ack=None):
+            print("second exchange callback called: ", msg)
+            if isinstance(msg, ConsumeOK):
+                print("consume OK ctag: ", msg.consumer_tag)
             nonlocal second_exchange_message
             second_exchange_message = msg
             second_exchange_callback_event.set()
@@ -679,7 +684,6 @@ class TestCaching(unittest.TestCase):
         fanout_exchange_params = ExchangeParams(
             "fanout_exchange", exchange_type=ExchangeType.fanout
         )
-        queue_consume_params.consumer_tag = "newctag"
 
         queue_callback_event.clear()
         self.consumer.consume(queue_consume_params,
