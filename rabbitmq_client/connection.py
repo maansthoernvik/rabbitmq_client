@@ -381,7 +381,10 @@ class RMQConnection(ABC):
         :param _channel: pika.channel.Channel
         :param reason: pika.exceptions.?
         """
-        LOGGER.warning("channel closed")
+        # TODO: handle 405 - resource locked, also a reason for permanent
+        #  closure
+
+        LOGGER.warning(f"channel closed: {reason}")
 
         permanent = False
 

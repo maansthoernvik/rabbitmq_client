@@ -288,7 +288,8 @@ class RMQConsumer(RMQConnection):
         else:
             ctag = self.ongoing_consume(consume_params.queue)
             if ctag is not None:
-                LOGGER.info("queue is already consumed from")
+                LOGGER.info(f"queue '{consume_params.queue}' "
+                            f"is already consumed from")
                 # Notify of ongoing consumer tag.
                 consume_params.on_message_callback(ConsumeOK(ctag))
                 # No need to consume again since the queue is already consumed
@@ -358,7 +359,8 @@ class RMQConsumer(RMQConnection):
 
         ctag = self.ongoing_consume(consume_params.queue)
         if ctag is not None:
-            LOGGER.info("queue is already consumed from")
+            LOGGER.info(f"queue '{consume_params.queue}' "
+                        f"is already consumed from")
             # Notify of ongoing consumer tag.
             consume_params.on_message_callback(ConsumeOK(ctag))
             # No need to consume again since the queue is already consumed
@@ -422,7 +424,7 @@ class RMQConsumer(RMQConnection):
         :param _basic_properties: pika.spec.Basic.Properties
         :param body: bytes
         """
-        LOGGER.debug(f"received message: {body}")
+        LOGGER.debug(f"consumer received message: {body}")
 
         consume = self._consumes[basic_deliver.consumer_tag]
 
