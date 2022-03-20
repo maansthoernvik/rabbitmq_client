@@ -1,22 +1,25 @@
+from pika.exchange_type import ExchangeType
+from typing import Union
+
 import functools
 import logging
 
-from rabbitmq_client.defs import QueueParams, QueueBindParams, ConsumeOK
+from rabbitmq_client.defs import (
+    QueueParams,
+    QueueBindParams,
+    ConsumeOK,
+    ConsumeParams,
+    ExchangeParams
+)
 from rabbitmq_client.connection import RMQConnection
 
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _gen_consume_key(queue=None,
-                     exchange=None,
-                     routing_key=None):
-    """
-    :param queue: str
-    :param exchange: str
-    :param routing_key: str
-    :return: str
-    """
+def _gen_consume_key(queue: str = "",
+                     exchange: str = "",
+                     routing_key: str = "") -> str:
     key_list = []
     key_list.append(queue) if queue else ""
     key_list.append(exchange) if exchange else ""
@@ -84,6 +87,10 @@ class RMQConsumer(RMQConnection):
 
         self._ready = False
         self._consumes = dict()
+
+        self._declared_queues = set()
+        self._declared_exchanges = set()
+        self._consumed_queues = dict()
 
     @property
     def ready(self):
@@ -165,14 +172,23 @@ class RMQConsumer(RMQConnection):
             )
 
         consume_key = _gen_consume_key(
-            queue_params.queue if queue_params else "",
-            exchange_params.exchange if exchange_params else "",
-            routing_key
+            queue=queue_params.queue if queue_params else "",
+            exchange=exchange_params.exchange if exchange_params else "",
+            routing_key=routing_key
         )
         if self._consumes.get(consume_key) is not None:
             raise ValueError(
                 "That combination of queue + exchange + routing key is "
                 "already consumed from."
+            )
+
+        if (
+                exchange_params is not None and
+                exchange_params.exchange_type is ExchangeType.direct and
+                not routing_key
+        ):
+            raise ValueError(
+                "Direct exchanges must have a routing key set."
             )
 
         # 2. Update consumer instance
@@ -203,13 +219,22 @@ class RMQConsumer(RMQConnection):
         if queue_params is None:
             queue_params = QueueParams("", exclusive=True)
 
-        cb = functools.partial(self.on_queue_declared,
-                               consume_params=consume_params,
-                               queue_params=queue_params,
-                               exchange_params=exchange_params,
-                               routing_key=routing_key)
+        if queue_params.queue in self._declared_queues:
+            consume_params.queue = queue_params.queue
 
-        self.declare_queue(queue_params, callback=cb)
+            self.check_declare_exchange(consume_params,
+                                        queue_params,
+                                        exchange_params,
+                                        routing_key)
+
+        else:
+            cb = functools.partial(self.on_queue_declared,
+                                   consume_params=consume_params,
+                                   queue_params=queue_params,
+                                   exchange_params=exchange_params,
+                                   routing_key=routing_key)
+
+            self.declare_queue(queue_params, callback=cb)
 
     def on_queue_declared(self,
                           frame,
@@ -226,12 +251,32 @@ class RMQConsumer(RMQConnection):
         """
         LOGGER.info(f"declared queue: {frame.method.queue}")
 
+        self._declared_queues.add(frame.method.queue)
+
         # Update the consume queue name to ensure it is set to the created
-        # queue's name
+        # queue's name in case of automatic name generation.
         consume_params.queue = frame.method.queue
 
-        if exchange_params is not None:
+        self.check_declare_exchange(consume_params,
+                                    queue_params,
+                                    exchange_params,
+                                    routing_key)
 
+    def check_declare_exchange(self,
+                               consume_params: ConsumeParams,
+                               queue_params: QueueParams,
+                               exchange_params: Union[ExchangeParams, None],
+                               routing_key: str):
+        if (
+                exchange_params is not None and
+                exchange_params.exchange in self._declared_exchanges
+        ):
+            self.handle_queue_binding(consume_params,
+                                      queue_params,
+                                      exchange_params,
+                                      routing_key)
+
+        elif exchange_params is not None:
             cb = functools.partial(self.on_exchange_declared,
                                    exchange_params,
                                    consume_params=consume_params,
@@ -241,6 +286,16 @@ class RMQConsumer(RMQConnection):
             self.declare_exchange(exchange_params, callback=cb)
 
         else:
+            ctag = self.ongoing_consume(consume_params.queue)
+            if ctag is not None:
+                LOGGER.info(f"queue '{consume_params.queue}' "
+                            f"is already consumed from")
+                # Notify of ongoing consumer tag.
+                consume_params.on_message_callback(ConsumeOK(ctag))
+                # No need to consume again since the queue is already consumed
+                # from.
+                return
+
             cb = functools.partial(self.on_consume_ok,
                                    queue_params=queue_params)
 
@@ -263,6 +318,18 @@ class RMQConsumer(RMQConnection):
         """
         LOGGER.info(f"declared exchange: {exchange_params.exchange}")
 
+        self._declared_exchanges.add(exchange_params.exchange)
+
+        self.handle_queue_binding(consume_params,
+                                  queue_params,
+                                  exchange_params,
+                                  routing_key)
+
+    def handle_queue_binding(self,
+                             consume_params: ConsumeParams,
+                             queue_params: QueueParams,
+                             exchange_params: ExchangeParams,
+                             routing_key: str):
         cb = functools.partial(self.on_queue_bound,
                                consume_params=consume_params,
                                queue_params=queue_params,
@@ -290,6 +357,16 @@ class RMQConsumer(RMQConnection):
         LOGGER.info(f"queue {consume_params.queue} bound to exchange "
                     f"{exchange}")
 
+        ctag = self.ongoing_consume(consume_params.queue)
+        if ctag is not None:
+            LOGGER.info(f"queue '{consume_params.queue}' "
+                        f"is already consumed from")
+            # Notify of ongoing consumer tag.
+            consume_params.on_message_callback(ConsumeOK(ctag))
+            # No need to consume again since the queue is already consumed
+            # from.
+            return
+
         cb = functools.partial(self.on_consume_ok,
                                queue_params=queue_params,
                                exchange=exchange,
@@ -298,6 +375,9 @@ class RMQConsumer(RMQConnection):
         self.basic_consume(consume_params,
                            on_message_callback_override=self.on_msg,
                            callback=cb)
+
+    def ongoing_consume(self, queue: str) -> Union[str, None]:
+        return self._consumed_queues.get(queue)
 
     def on_consume_ok(self,
                       frame,
@@ -320,6 +400,10 @@ class RMQConsumer(RMQConnection):
         # Update with real consumer tag, may or may not be the same tag.
         consume_instance.consumer_tag = frame.method.consumer_tag
 
+        self._consumed_queues[consume_instance.consume_params.queue] = (
+            consume_instance.consumer_tag
+        )
+
         # Enables lookup via consumer tag in 'on_msg'. These entries are
         # removed 'on_close' since the consumer tags may be refreshed on
         # reconnecting.
@@ -340,6 +424,8 @@ class RMQConsumer(RMQConnection):
         :param _basic_properties: pika.spec.Basic.Properties
         :param body: bytes
         """
+        LOGGER.debug(f"consumer received message: {body}")
+
         consume = self._consumes[basic_deliver.consumer_tag]
 
         try:
@@ -384,12 +470,18 @@ class RMQConsumer(RMQConnection):
 
         :param permanent: bool
         """
-        if permanent:
+        if not self._closing and permanent:
             LOGGER.critical("consumer connection permanently closed")
         else:
             LOGGER.info("consumer connection closed")
 
         self._ready = False
+
+        # Reset cached declarations, no way of knowing what's still around
+        # after a restart.
+        self._declared_queues = set()
+        self._declared_exchanges = set()
+        self._consumed_queues = dict()
 
         old_consumer_tags = list()
         for _key, consume in self._consumes.items():

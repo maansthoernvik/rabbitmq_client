@@ -110,7 +110,7 @@ class RMQConnection(ABC):
             self._connection.close()
             self._restarting = True  # Only if connection could be closed.
         except ConnectionWrongStateError:
-            LOGGER.info("connection closed and could not be restarted")
+            LOGGER.error("connection closed and could not be restarted")
 
     def stop(self):
         """
@@ -381,7 +381,10 @@ class RMQConnection(ABC):
         :param _channel: pika.channel.Channel
         :param reason: pika.exceptions.?
         """
-        LOGGER.warning("channel closed")
+        # TODO: handle 405 - resource locked, also a reason for permanent
+        #  closure
+
+        LOGGER.warning(f"channel closed: {reason}")
 
         permanent = False
 

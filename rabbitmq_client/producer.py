@@ -55,8 +55,12 @@ class RMQProducer(RMQConnection):
 
         self._ready = False
 
+        self._declared_queues = set()
+        self._declared_exchanges = set()
+
         self._buffered_messages = list()
 
+        # Confirm mode
         self._confirm_mode_active = False
         self._confirm_delivery_callback = None
         self._next_delivery_tag = 1
@@ -199,7 +203,10 @@ class RMQProducer(RMQConnection):
         :param publish_params: rabbitmq_client.PublishParams
         :param publish_key: str
         """
-        if queue_params:
+        if (
+                queue_params and
+                queue_params.queue not in self._declared_queues
+        ):
 
             cb = functools.partial(self.on_queue_declared,
                                    body,
@@ -208,7 +215,10 @@ class RMQProducer(RMQConnection):
 
             self.declare_queue(queue_params, callback=cb)
 
-        else:
+        elif (
+                exchange_params and
+                exchange_params.exchange not in self._declared_exchanges
+        ):
             cb = functools.partial(self.on_exchange_declared,
                                    body,
                                    exchange_params,
@@ -217,6 +227,17 @@ class RMQProducer(RMQConnection):
                                    publish_key=publish_key)
 
             self.declare_exchange(exchange_params, callback=cb)
+
+        else:  # Declarations are already complete.
+            self._finalize_publish(
+                body,
+                exchange=(DEFAULT_EXCHANGE if exchange_params is None
+                          else exchange_params.exchange),
+                routing_key=(routing_key if queue_params is None
+                             else queue_params.queue),
+                publish_params=publish_params,
+                publish_key=publish_key
+            )
 
     def on_queue_declared(self,
                           body,
@@ -230,6 +251,8 @@ class RMQProducer(RMQConnection):
         :param publish_key: str
         """
         LOGGER.info(f"declared queue: {frame.method.queue}")
+
+        self._declared_queues.add(frame.method.queue)
 
         self._finalize_publish(body,
                                routing_key=frame.method.queue,
@@ -252,6 +275,8 @@ class RMQProducer(RMQConnection):
         :param publish_key: str
         """
         LOGGER.info(f"declared exchange: {exchange_params.exchange}")
+
+        self._declared_exchanges.add(exchange_params.exchange)
 
         self._finalize_publish(body,
                                exchange=exchange_params.exchange,
@@ -357,7 +382,7 @@ class RMQProducer(RMQConnection):
 
         :param permanent: bool
         """
-        if permanent:
+        if not self._closing and permanent:
             LOGGER.critical("producer connection permanently closed")
         else:
             LOGGER.info("producer connection closed")
@@ -367,6 +392,11 @@ class RMQProducer(RMQConnection):
         # Delivery tags are channel-specific, so connection going down means
         # the tag is reset.
         self._next_delivery_tag = 1
+
+        # Reset cached declarations, no way of knowing what's still around
+        # after a restart.
+        self._declared_queues = set()
+        self._declared_exchanges = set()
 
     def on_error(self):
         """

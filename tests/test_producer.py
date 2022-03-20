@@ -401,3 +401,80 @@ class TestConfirmMode(unittest.TestCase):
         self.producer.on_confirm_select_ok(Mock())
         self.producer.declare_exchange.assert_called()
         self.assertEqual(len(self.producer._buffered_messages), 0)
+
+
+class TestCaching(unittest.TestCase):
+
+    @patch("rabbitmq_client.consumer.RMQConnection.start")
+    def setUp(self, _connection_start) -> None:
+        """Setup to run before each test case."""
+        self.producer = RMQProducer()
+        self.producer.start()
+        # To avoid exceptions when finalizing a produce
+        self.producer.on_channel_open(Mock())
+        self.producer.on_ready()  # Fake connection getting ready
+
+        self.producer.declare_queue = Mock()
+        self.producer.declare_exchange = Mock()
+        self.producer.bind_queue = Mock()
+        self.producer.basic_consume = Mock()
+
+    def test_queue_cached(self):
+        queue_params = QueueParams("queue")
+
+        frame_mock = Mock()
+        frame_mock.method.queue = queue_params.queue
+        self.producer.on_queue_declared(b"body", frame_mock)
+
+        # Verify a new publish does not lead to re-declaring the queue.
+        self.producer.publish(b"body", queue_params=queue_params)
+
+        self.producer.declare_queue.assert_not_called()
+
+    def test_exchange_cached(self):
+        exchange_params = ExchangeParams("exchange")
+
+        self.producer.on_exchange_declared(b"body", exchange_params, Mock())
+
+        # Verify a new publish does not lead to re-declaring the queue.
+        self.producer.publish(b"body", exchange_params=exchange_params)
+
+        self.producer.declare_exchange.assert_not_called()
+
+    def test_queue_cache_dropped_on_connection_closed(self):
+        queue_params = QueueParams("queue")
+
+        frame_mock = Mock()
+        frame_mock.method.queue = queue_params.queue
+        self.producer.on_queue_declared(b"body", frame_mock)
+
+        # Verify a new publish does not lead to re-declaring the queue.
+        self.producer.publish(b"body", queue_params=queue_params)
+
+        self.producer.declare_queue.assert_not_called()
+
+        # on_close should clear cache
+        self.producer.on_close()
+        self.producer.on_ready()  # ready to avoid publish buffering
+
+        # A new publish should lead to re-declaring the queue
+        self.producer.publish(b"body", queue_params=queue_params)
+        self.producer.declare_queue.assert_called()
+
+    def test_exchange_cache_dropped_on_connection_closed(self):
+        exchange_params = ExchangeParams("queue")
+
+        self.producer.on_exchange_declared(b"body", exchange_params, Mock())
+
+        # Verify a new publish does not lead to re-declaring the exchange.
+        self.producer.publish(b"body", exchange_params=exchange_params)
+
+        self.producer.declare_exchange.assert_not_called()
+
+        # on_close should clear cache
+        self.producer.on_close()
+        self.producer.on_ready()  # ready to avoid publish buffering
+
+        # A new publish should lead to re-declaring the queue
+        self.producer.publish(b"body", exchange_params=exchange_params)
+        self.producer.declare_exchange.assert_called()
