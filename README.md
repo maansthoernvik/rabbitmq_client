@@ -1,6 +1,7 @@
 # RabbitMQ client helpers based on pika
 [![PyPI version](https://badge.fury.io/py/rabbitmq-client.svg)](https://badge.fury.io/py/rabbitmq-client)
 [![Build](https://github.com/maansthoernvik/rabbitmq_client/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/maansthoernvik/rabbitmq_client/actions/workflows/build.yml)
+[![codecov](https://codecov.io/gh/maansthoernvik/rabbitmq_client/branch/master/graph/badge.svg?token=R4C6ND9QP2)](https://codecov.io/gh/maansthoernvik/rabbitmq_client)
 
 This project provides helper classes for using RabbitMQ in Python. It is 
 based on `pika`, which is an awesome no-dependency client library for 
