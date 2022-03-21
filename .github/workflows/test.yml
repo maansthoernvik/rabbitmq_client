@@ -55,4 +55,12 @@ jobs:
           tests.test_producer \
           tests.test_integration -f -v
         coverage report -m --fail-under 96
+        coverage xml
 
+    #
+    # Codecov
+    #
+
+    - name: Upload to Codecov
+      run: |
+        curl -Os https://uploader.codecov.io/latest/linux/codecov chmod +x codecov ./codecov

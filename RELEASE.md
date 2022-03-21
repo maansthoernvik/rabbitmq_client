@@ -7,3 +7,4 @@ Once target functionality has been completed and verified...
 2. The change is committed and pushed to `master`.
 3. `python setup.py upload` is run, which makes the new package version
    available on [PyPi](https://pypi.org/project/rabbitmq-client/).
+4. Create a new release: [GitHub releases](https://github.com/maansthoernvik/rabbitmq_client/releases/new)
