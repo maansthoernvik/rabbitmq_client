@@ -33,10 +33,10 @@ class ConnectionImplementer(RMQConnection):
     def on_ready(self):
         pass
 
-    def on_close(self):
+    def on_close(self, permanent=False):
         pass
 
-    def on_error(self):
+    def on_error(self, error):
         pass
 
 

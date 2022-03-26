@@ -239,11 +239,6 @@ class TestConsumer(unittest.TestCase):
         self.consumer.on_close(permanent=True)
         self.assertFalse(self.consumer.ready)
 
-    def test_consumer_error_handling(self):
-        """Verify on_error results in correct behavior..."""
-        with self.assertRaises(NotImplementedError):
-            self.consumer.on_error()
-
     def test_on_queue_declared_no_exchange(self):
         """
         Verify that the correct action follows a successful queue declare.
