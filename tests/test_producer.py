@@ -4,7 +4,7 @@ from typing import Union
 from unittest.mock import Mock, patch, ANY
 from pika.spec import Basic
 
-from rabbitmq_client.connection import MandatoryError
+from rabbitmq_client.connection import MandatoryError, DeclarationError
 from rabbitmq_client import (
     RMQProducer,
     ExchangeParams,
@@ -438,6 +438,19 @@ class TestConfirmMode(unittest.TestCase):
         # Some publish fails due to the mandatory flag being set
         self.producer.on_error(MandatoryError("exchange", "publish_key"))
         self.assertTrue(mandatory_flag_set_in_delivery_error)
+
+    def test_on_error_mandatory_error_works_outside_confirm_mode(self):
+        """
+        Outside confirm mode test of mandatory errors, in which case just log
+        a warning.
+        """
+        self.producer.on_error(MandatoryError("exchange", "publish_key"))
+
+    def test_on_error_declaration_error(self):
+        """
+        No crashes when receiving a declaration error.
+        """
+        self.producer.on_error(DeclarationError("a message"))
 
 
 class TestCaching(unittest.TestCase):
