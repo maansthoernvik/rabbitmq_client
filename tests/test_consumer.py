@@ -5,6 +5,7 @@ from unittest.mock import patch, Mock, ANY, call
 
 from pika.exchange_type import ExchangeType
 
+from rabbitmq_client.connection import DeclarationError, MandatoryError
 from rabbitmq_client import (
     ExchangeParams,
     ConsumeParams,
@@ -239,10 +240,11 @@ class TestConsumer(unittest.TestCase):
         self.consumer.on_close(permanent=True)
         self.assertFalse(self.consumer.ready)
 
-    def test_consumer_error_handling(self):
-        """Verify on_error results in correct behavior..."""
-        with self.assertRaises(NotImplementedError):
-            self.consumer.on_error()
+    def test_consumer_on_error(self):
+        self.consumer.on_error(DeclarationError("blabla"))
+        self.consumer.on_error(
+            MandatoryError("exchange", "this can't happen...")
+        )
 
     def test_on_queue_declared_no_exchange(self):
         """

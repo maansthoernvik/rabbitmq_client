@@ -155,8 +155,6 @@ class ConfirmModeOK:
 
 class DeliveryError:
 
-    def __init__(self, publish_key):
-        """
-        :param publish_key: int
-        """
+    def __init__(self, publish_key: str, mandatory: bool = False):
         self.publish_key = publish_key
+        self.mandatory = mandatory

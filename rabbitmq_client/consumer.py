@@ -1,8 +1,8 @@
-from pika.exchange_type import ExchangeType
-from typing import Union
-
 import functools
 import logging
+
+from pika.exchange_type import ExchangeType
+from typing import Union
 
 from rabbitmq_client.defs import (
     QueueParams,
@@ -11,8 +11,11 @@ from rabbitmq_client.defs import (
     ConsumeParams,
     ExchangeParams
 )
-from rabbitmq_client.connection import RMQConnection
-
+from rabbitmq_client.connection import (
+    RMQConnection,
+    MandatoryError,
+    DeclarationError
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -494,15 +497,11 @@ class RMQConsumer(RMQConnection):
         for consumer_tag in old_consumer_tags:
             self._consumes.pop(consumer_tag, None)
 
-    def on_error(self):
+    def on_error(self, error: Union[MandatoryError, DeclarationError]):
         """
         Connection hook, called when the connection has encountered an error.
         """
-        LOGGER.info("consumer connection error")
-
-        raise NotImplementedError
-        # Possible errors:
-        # * channel died and will not recover
-        # * callback for operation failed
-        # * declaration with faulty parameters attempted
-        # TODO: Add possibility to signal user that an error has occurred.
+        if isinstance(error, DeclarationError):
+            LOGGER.warning(f"failed to declare something: {error.message}")
+        else:
+            LOGGER.error("an error occurred:", error)

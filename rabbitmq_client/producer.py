@@ -1,3 +1,5 @@
+from typing import Callable, Union
+
 import functools
 import logging
 import uuid
@@ -6,7 +8,11 @@ from threading import Lock
 
 from pika.spec import Basic
 
-from rabbitmq_client.connection import RMQConnection
+from rabbitmq_client.connection import (
+    RMQConnection,
+    MandatoryError,
+    DeclarationError
+)
 from rabbitmq_client.defs import (
     ConfirmModeOK,
     DeliveryError,
@@ -177,10 +183,11 @@ class RMQProducer(RMQConnection):
 
         return publish_key
 
-    def activate_confirm_mode(self, notify_callback):
-        """
-        :param notify_callback: callable
-        """
+    def activate_confirm_mode(self,
+                              notify_callback: Callable[
+                                  [Union[str, ConfirmModeOK, DeliveryError]],
+                                  None
+                              ]):
         if self.ready and self._confirm_delivery_callback is None:
             LOGGER.info("activating confirm delivery mode")
             self.confirm_delivery(self.on_delivery_confirmed,
@@ -306,7 +313,8 @@ class RMQProducer(RMQConnection):
                 self.basic_publish(body,
                                    exchange=exchange,
                                    routing_key=routing_key,
-                                   publish_params=publish_params)
+                                   publish_params=publish_params,
+                                   publish_key=publish_key)
 
         else:
             self.basic_publish(body,
@@ -342,18 +350,22 @@ class RMQProducer(RMQConnection):
         """
         :param frame: pika.frame.Method
         """
-        publish_key = self._unacked_publishes.pop(
-            frame.method.delivery_tag
-        )
-
-        if isinstance(frame.method, Basic.Ack):
-            self._confirm_delivery_callback(publish_key)
-
-        else:
-            LOGGER.error(f"broker nacked a publish: {frame}")
-            self._confirm_delivery_callback(
-                DeliveryError(publish_key)
+        try:
+            publish_key = self._unacked_publishes.pop(
+                frame.method.delivery_tag
             )
+
+            if isinstance(frame.method, Basic.Ack):
+                self._confirm_delivery_callback(publish_key)
+
+            else:
+                LOGGER.error(f"broker nacked a publish: {frame}")
+                self._confirm_delivery_callback(
+                    DeliveryError(publish_key)
+                )
+        except KeyError:
+            LOGGER.warning(f"RabbitMQ confirmed unexpected delivery tag:"
+                           f" {frame.method.delivery_tag}")
 
     def on_ready(self):
         """
@@ -398,15 +410,20 @@ class RMQProducer(RMQConnection):
         self._declared_queues = set()
         self._declared_exchanges = set()
 
-    def on_error(self):
+    def on_error(self, error: Union[MandatoryError, DeclarationError]):
         """
         Connection hook, called when the connection has encountered an error.
         """
         LOGGER.info("producer connection error")
 
-        raise NotImplementedError
-        # Possible errors:
-        # * channel died and will not recover
-        # * callback for operation failed
-        # * declaration with faulty parameters attempted
-        # TODO: Add possibility to signal user that an error has occurred.
+        if isinstance(error, MandatoryError):
+            if self._confirm_delivery_callback is not None:
+                self._confirm_delivery_callback(
+                    DeliveryError(error.publish_key, mandatory=True)
+                )
+            else:
+                LOGGER.warning(f"failed to publish to exchange "
+                               f"'{error.exchange}', no queue is bound to it")
+
+        elif isinstance(error, DeclarationError):
+            LOGGER.warning(f"failed to declare something: {error.message}")

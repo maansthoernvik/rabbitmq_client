@@ -1,3 +1,4 @@
+import pika
 import threading
 import time
 import unittest
@@ -165,7 +166,8 @@ class TestIntegration(unittest.TestCase):
     #     logger.addHandler(logging.StreamHandler())
 
     def setUp(self) -> None:
-        self.consumer = RMQConsumer()
+        self.consumer = RMQConsumer(
+            connection_parameters=pika.ConnectionParameters())
         self.consumer.start()
         self.assertTrue(started(self.consumer))
 

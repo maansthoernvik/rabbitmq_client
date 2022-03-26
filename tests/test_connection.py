@@ -1,3 +1,4 @@
+import pika.exceptions
 import unittest
 
 from unittest.mock import Mock, patch
@@ -32,10 +33,10 @@ class ConnectionImplementer(RMQConnection):
     def on_ready(self):
         pass
 
-    def on_close(self):
+    def on_close(self, permanent=False):
         pass
 
-    def on_error(self):
+    def on_error(self, error):
         pass
 
 
@@ -140,6 +141,26 @@ class TestConnectionBase(unittest.TestCase):
         self.conn_imp.on_close.assert_called()
         self.conn_imp._connection.ioloop.stop.assert_called()
         self.conn_imp._reconnect.assert_called()
+
+    @patch("rabbitmq_client.connection.SelectConnection")
+    def test_connection_closed_for_unknown_reason(self, _select_connection):
+        """
+        Verify connection closed due to StreamLostError.
+        """
+        # Setup
+        self.conn_imp.on_close = Mock()
+        self.conn_imp._reconnect = Mock()
+        self.conn_imp.start()
+        self.conn_imp.on_connection_open(None)
+        self.conn_imp.on_channel_open(Mock())
+
+        # Run test
+        self.conn_imp.on_connection_closed(
+            None, ValueError()
+        )
+
+        # Assertions
+        self.conn_imp.on_close.assert_called_with(permanent=True)
 
     @patch("rabbitmq_client.connection.SelectConnection")
     def test_stop_connection(self, _select_connection):
@@ -291,11 +312,10 @@ class TestConnectionBase(unittest.TestCase):
         # Setup
         self.conn_imp.on_close = Mock()
         self.conn_imp.stop = Mock()
-        reason_mock = Mock()
-        reason_mock.reply_code = 406  # PRECONDITION FAILED
+        reason = pika.exceptions.ChannelClosedByBroker(406, "bla")
 
         # Run test
-        self.conn_imp.on_channel_closed(None, reason_mock)
+        self.conn_imp.on_channel_closed(None, reason)
 
         # Assertions
         self.conn_imp.on_close.assert_called_with(permanent=True)

@@ -1,9 +1,10 @@
 import unittest
 
+from typing import Union
 from unittest.mock import Mock, patch, ANY
-
 from pika.spec import Basic
 
+from rabbitmq_client.connection import MandatoryError, DeclarationError
 from rabbitmq_client import (
     RMQProducer,
     ExchangeParams,
@@ -43,11 +44,6 @@ class TestProducer(unittest.TestCase):
         self.assertTrue(self.producer.ready)
         self.producer.on_close(permanent=True)
         self.assertFalse(self.producer.ready)
-
-    def test_producer_error_handling(self):
-        """Verify on_error results in correct behavior..."""
-        with self.assertRaises(NotImplementedError):
-            self.producer.on_error()
 
     def test_publish_using_exchange_params(self):
         """Verify possibility to publish to an exchange."""
@@ -286,7 +282,7 @@ class TestConfirmMode(unittest.TestCase):
         )
         self.producer.basic_publish.assert_called_with(
             b"body", exchange=exchange_params.exchange, routing_key="",
-            publish_params=ANY
+            publish_params=ANY, publish_key=publish_key
         )
         # 1 is the delivery tag
         self.assertEqual(self.producer._unacked_publishes[1], publish_key)
@@ -401,6 +397,60 @@ class TestConfirmMode(unittest.TestCase):
         self.producer.on_confirm_select_ok(Mock())
         self.producer.declare_exchange.assert_called()
         self.assertEqual(len(self.producer._buffered_messages), 0)
+
+    def test_confirm_mode_unknown_delivery_tag(self):
+        self.producer.activate_confirm_mode(lambda _: ...)
+        exchange_params = ExchangeParams("exchange")
+
+        # Test + assertions
+        pub_key = self.producer.publish(b"body",
+                                        exchange_params=exchange_params)
+        self.producer.on_ready()  # -> confirm_mode
+        self.producer.on_confirm_select_ok(Mock())
+        self.producer.on_exchange_declared(b"body",
+                                           exchange_params,
+                                           Mock(),
+                                           publish_key=pub_key)
+
+        self.assertEqual(pub_key,
+                         self.producer._unacked_publishes[
+                             self.producer._next_delivery_tag-1
+                         ])
+
+        delivery_confirmed_frame = Mock()
+        delivery_confirmed_frame.method.delivery_tag = 1337
+
+        # no crash occurs :-)
+        self.producer.on_delivery_confirmed(delivery_confirmed_frame)
+
+    def test_on_error_leads_to_delivery_error_if_mandatory_failure(self):
+        mandatory_flag_set_in_delivery_error = False
+
+        def confirm_delivery(tag: Union[str, ConfirmModeOK, DeliveryError]):
+            nonlocal mandatory_flag_set_in_delivery_error
+            if isinstance(tag, DeliveryError) and tag.mandatory:
+                mandatory_flag_set_in_delivery_error = True
+
+        self.producer.activate_confirm_mode(confirm_delivery)
+        self.producer.on_ready()  # -> confirm_mode
+        self.producer.on_confirm_select_ok(Mock())
+
+        # Some publish fails due to the mandatory flag being set
+        self.producer.on_error(MandatoryError("exchange", "publish_key"))
+        self.assertTrue(mandatory_flag_set_in_delivery_error)
+
+    def test_on_error_mandatory_error_works_outside_confirm_mode(self):
+        """
+        Outside confirm mode test of mandatory errors, in which case just log
+        a warning.
+        """
+        self.producer.on_error(MandatoryError("exchange", "publish_key"))
+
+    def test_on_error_declaration_error(self):
+        """
+        No crashes when receiving a declaration error.
+        """
+        self.producer.on_error(DeclarationError("a message"))
 
 
 class TestCaching(unittest.TestCase):
