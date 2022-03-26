@@ -1,3 +1,4 @@
+import pika.exceptions
 import unittest
 
 from unittest.mock import Mock, patch
@@ -291,11 +292,10 @@ class TestConnectionBase(unittest.TestCase):
         # Setup
         self.conn_imp.on_close = Mock()
         self.conn_imp.stop = Mock()
-        reason_mock = Mock()
-        reason_mock.reply_code = 406  # PRECONDITION FAILED
+        reason = pika.exceptions.ChannelClosedByBroker(406, "bla")
 
         # Run test
-        self.conn_imp.on_channel_closed(None, reason_mock)
+        self.conn_imp.on_channel_closed(None, reason)
 
         # Assertions
         self.conn_imp.on_close.assert_called_with(permanent=True)

@@ -1,15 +1,16 @@
 import logging
+import pika
 
+from typing import Union
 from abc import ABC, abstractmethod
-
 from threading import Thread, Timer
 
-import pika
 from pika import SelectConnection
 from pika.exceptions import (
     ConnectionClosedByBroker,
     StreamLostError,
-    ConnectionWrongStateError
+    ConnectionWrongStateError,
+    ChannelClosedByBroker
 )
 
 from rabbitmq_client.defs import DEFAULT_EXCHANGE, PublishParams
@@ -21,6 +22,25 @@ RECONNECT_REASONS = (
     ConnectionClosedByBroker,  # Restarts/graceful shutdowns
     StreamLostError  # Ungraceful shutdown
 )
+
+# 405 = Resource locked
+# 406 = PRECONDITION FAILED
+PERMANENT_CLOSURE_CODES = (
+    405, 406
+)
+
+
+class MandatoryError:
+
+    def __init__(self, exchange: str, publish_key: str):
+        self.exchange = exchange
+        self.publish_key = publish_key
+
+
+class DeclarationError:
+
+    def __init__(self, message: str):
+        self.message = message
 
 
 class RMQConnection(ABC):
@@ -76,7 +96,7 @@ class RMQConnection(ABC):
         pass
 
     @abstractmethod
-    def on_error(self):
+    def on_error(self, error: Union[MandatoryError, DeclarationError]):
         """
         Implementers can handle what should happen when the RMQConnection has
         run into an error, for example an Exchange/Queue declaration failure.
@@ -207,27 +227,25 @@ class RMQConnection(ABC):
         )
 
     def basic_publish(self,
-                      body,
-                      exchange=DEFAULT_EXCHANGE,
-                      routing_key="",
-                      publish_params=None):
-        """
-        :param body: bytes
-        :param exchange: str
-        :param routing_key: str
-        :param publish_params: rabbitmq_client.PublishParams
-        """
+                      body: bytes,
+                      exchange: str = DEFAULT_EXCHANGE,
+                      routing_key: str = "",
+                      publish_params: PublishParams = None,
+                      publish_key: str = None):
         LOGGER.debug(f"publishing to exchange: {exchange} and routing key: "
                      f"{routing_key}")
 
         if not publish_params:
             publish_params = PublishParams()  # Create defaults
 
-        self._channel.basic_publish(exchange,
-                                    routing_key,
-                                    body,
-                                    properties=publish_params.properties,
-                                    mandatory=publish_params.mandatory)
+        try:
+            self._channel.basic_publish(exchange,
+                                        routing_key,
+                                        body,
+                                        properties=publish_params.properties,
+                                        mandatory=publish_params.mandatory)
+        except pika.exceptions.UnroutableError:
+            self.on_error(MandatoryError(exchange, publish_key))
 
     def confirm_delivery(self, on_delivery_confirmed, callback=None):
         """
@@ -304,10 +322,16 @@ class RMQConnection(ABC):
         # on_connection_closed handling is done.
         self._connection.ioloop.stop()
 
+        # Not something user-triggered, but good enough reason to re-connect
         if not self._closing and type(reason) in RECONNECT_REASONS:
             LOGGER.debug(f"connection closed: {reason}, attempting reconnect")
             self._reconnect()
 
+        elif self._closing:
+            LOGGER.debug("connection closed")
+            permanent = True
+
+        # We're restarting, gogo and restart
         elif self._restarting:
             LOGGER.debug("connection closed, restarting now")
             # Reset to prevent reconnect for any reason
@@ -316,6 +340,7 @@ class RMQConnection(ABC):
                                              daemon=True)
             self._connection_thread.start()
 
+        # something unknown has happened
         else:
             permanent = True
             LOGGER.warning(f"connection closed: {reason}, will not reconnect")
@@ -381,23 +406,22 @@ class RMQConnection(ABC):
         :param _channel: pika.channel.Channel
         :param reason: pika.exceptions.?
         """
-        # TODO: handle 405 - resource locked, also a reason for permanent
-        #  closure
-
-        LOGGER.warning(f"channel closed: {reason}")
-
         permanent = False
+        if self._closing:
+            LOGGER.info("a client requested shutdown has closed the channel")
+            permanent = True
 
-        try:
-            # Reply code 406 = PRECONDITION FAILED
-            permanent = True if reason.reply_code == 406 else False
-        except AttributeError:  # Not all reasons have a reply code
-            pass
+        elif (isinstance(reason, ChannelClosedByBroker) and
+              reason.reply_code in PERMANENT_CLOSURE_CODES):
+            LOGGER.critical(f"permanent channel closure due to: {reason}")
+            permanent = True
 
-        # Signal subclass that connection is down.
-        self.on_close(permanent=permanent)
-
-        if permanent:
-            LOGGER.critical(f"connection stopping due to permanent channel "
-                            f"closure: {reason}")
+            # TODO: Declare errors must have further purpose to be useful
+            #  otherwise why are we reporting them?
+            self.on_error(DeclarationError(reason.reply_text))
             self.stop()
+
+        else:
+            LOGGER.warning(f"channel was closed due to: {reason}")
+
+        self.on_close(permanent=permanent)

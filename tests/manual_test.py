@@ -1,6 +1,7 @@
 import time
 import logging
 import sys
+import signal
 import os
 
 from enum import Enum, auto
@@ -15,7 +16,10 @@ from rabbitmq_client import (  # noqa
     ConsumeOK,
     QueueParams,
     ExchangeParams,
-    ConsumeParams
+    ConsumeParams,
+    PublishParams,
+    DeliveryError,
+    ConfirmModeOK
 )
 from rabbitmq_client.consumer import _gen_consume_key  # noqa
 
@@ -23,24 +27,35 @@ LOGGER = logging.getLogger(__name__)
 
 
 def main():
-    # Logging
+    # Logging for the actual client
     logger = logging.getLogger("rabbitmq_client")
     logger.setLevel(logging.DEBUG)
-
     handler = logging.StreamHandler()
     handler.setLevel(logging.DEBUG)
-
+    handler.setFormatter(
+        logging.Formatter(
+            fmt="{asctime} {levelname:^8} {filename}:{lineno} {message}",
+            style="{"
+        )
+    )
     logger.addHandler(handler)
 
-    # TODO: input argument to control verbostity?
+    # Test code logger
     LOGGER.setLevel(logging.DEBUG)
     handler = logging.StreamHandler()
     handler.setLevel(logging.DEBUG)
-
+    handler.setFormatter(
+        logging.Formatter(
+            fmt="{asctime} {levelname:^8} {filename}:{lineno} {message}",
+            style="{"
+        )
+    )
     LOGGER.addHandler(handler)
 
     # Tester
     tester = Tester()
+
+    signal.signal(signal.SIGINT, tester.stop)
 
     # Start the tester, blocks
     tester.start()
@@ -53,6 +68,9 @@ class Tester:
         STOP = auto()
         CONSUME = auto()
         PRODUCE = auto()
+        CONFIRM_MODE = auto()
+        DECLARE_QUEUE = auto()
+        DECLARE_EXCHANGE = auto()
 
         # Queue/Exchange
         NO_QUEUE = auto()
@@ -67,7 +85,12 @@ class Tester:
         def __str__(self):
             return self.name
 
-    top_level_actions = [Action.STOP, Action.CONSUME, Action.PRODUCE]
+    top_level_actions = [Action.STOP,
+                         Action.CONSUME,
+                         Action.PRODUCE,
+                         Action.CONFIRM_MODE,
+                         Action.DECLARE_QUEUE,
+                         Action.DECLARE_EXCHANGE]
 
     YES = "y"
     NO = "n"  # unused
@@ -154,6 +177,16 @@ class Tester:
                                internal=internal),
                 routing_key,)
 
+    @staticmethod
+    def get_publish_info() -> PublishParams:
+        """
+        Asks the user for input about a queue to be declared.
+        """
+        mandatory = input("Mandatory (y/n): ")
+        print(mandatory == Tester.YES)
+
+        return PublishParams(mandatory=mandatory == Tester.YES)
+
     def __init__(self):
         self.keep_going = True
 
@@ -178,7 +211,7 @@ class Tester:
         self.take_user_input()
 
     def take_user_input(self):
-        while True:
+        while self.keep_going:
             print("--- Select an action ---")
             for i, action in enumerate(Tester.top_level_actions):
                 print(f"({i}): {action}")
@@ -189,13 +222,21 @@ class Tester:
 
             if action is Tester.Action.STOP:
                 self.stop()
-                break
 
             elif action is Tester.Action.CONSUME:
                 self.handle_consume_flow()
 
             elif action is Tester.Action.PRODUCE:
                 self.handle_produce_flow()
+
+            elif action is Tester.Action.CONFIRM_MODE:
+                self.handle_confirm_mode()
+
+            elif action is Tester.Action.DECLARE_QUEUE:
+                self.handle_declare_queue()
+
+            elif action is Tester.Action.DECLARE_EXCHANGE:
+                self.handle_declare_exchange()
 
     def handle_consume_flow(self):
         print("- consume menu -")
@@ -294,17 +335,90 @@ class Tester:
                                           exchange_params,
                                           routing_key)
 
+        publish_params = Tester.get_publish_info()
+
         try:
-            self.producer.publish(f"{msg}".encode(),
-                                  exchange_params=exchange_params,
-                                  routing_key=routing_key,
-                                  queue_params=queue_params)
+            publish_key = self.producer.publish(
+                f"{msg}".encode(),
+                exchange_params=exchange_params,
+                routing_key=routing_key,
+                queue_params=queue_params,
+                publish_params=publish_params
+            )
+
+            if publish_key is not None:
+                print(f"publish key: {publish_key}")
         except ValueError as e:
             print(e)
 
         # store declarations
         self.store_declarations(queue_params=queue_params,
                                 exchange_params=exchange_params)
+
+    def handle_confirm_mode(self):
+
+        def on_delivery_confirmed(tag: Union[str, DeliveryError]):
+            if isinstance(tag, DeliveryError):
+                print(f"delivery error for key {tag.publish_key}, "
+                      f"mandatory ?{tag.mandatory}")
+
+            elif isinstance(tag, ConfirmModeOK):
+                print("confirm mode started OK")
+
+            else:
+                print("delivery was successful!")
+                print(f"delivery confirmed: {tag}")
+
+        self.producer.activate_confirm_mode(on_delivery_confirmed)
+
+    def handle_declare_queue(self):
+        """
+        Handle declaring a queue, bypassing the cache to force trigger
+        duplication errors.
+        """
+
+        def on_queue_declared(frame):
+            print("Queue declared")
+
+        queue_opts = [Tester.Action.NEW_QUEUE,
+                      Tester.Action.EXISTING_QUEUE]
+        for i, action in enumerate(queue_opts):
+            print(f"({i}): {action}")
+        inp = input("Action: ")
+        action = queue_opts[int(inp)]
+
+        if action is Tester.Action.NEW_QUEUE:
+            queue_params = Tester.get_queue_info()
+
+        else:
+            queue_params = self.select_existing_queue()
+
+        self.consumer.declare_queue(queue_params, callback=on_queue_declared)
+
+    def handle_declare_exchange(self):
+        """
+        Handle declaring a queue, bypassing the cache to force trigger
+        duplication errors.
+        """
+
+        def on_exchange_declared(frame):
+            print("Exchange declared")
+
+        exchange_opts = [Tester.Action.NEW_EXCHANGE,
+                         Tester.Action.EXISTING_EXCHANGE]
+        for i, action in enumerate(exchange_opts):
+            print(f"({i}): {action}")
+        inp = input("Action: ")
+        action = exchange_opts[int(inp)]
+
+        if action is Tester.Action.NEW_EXCHANGE:
+            exchange_params, _ = Tester.get_exchange_info()
+
+        else:
+            exchange_params = self.select_existing_exchange()
+
+        self.producer.declare_exchange(exchange_params,
+                                       callback=on_exchange_declared)
 
     def store_declarations(self,
                            queue_params=None,
@@ -341,9 +455,10 @@ class Tester:
         inp = input("Exchange: ")
         return self.exchanges[int(inp)]
 
-    def stop(self):
+    def stop(self, _f=None, _s=None):
         self.consumer.stop()
         self.producer.stop()
+        self.keep_going = False
 
 
 if __name__ == "__main__":
