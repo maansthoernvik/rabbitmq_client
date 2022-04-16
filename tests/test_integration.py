@@ -592,9 +592,8 @@ class TestCaching(unittest.TestCase):
         queue_message = b""
 
         def queue_callback(msg, ack=None):
-            print("queue callback called: ", msg)
             if isinstance(msg, ConsumeOK):
-                print("consume OK ctag: ", msg.consumer_tag)
+                pass
             nonlocal queue_message
             queue_message = msg
             queue_callback_event.set()
@@ -621,9 +620,8 @@ class TestCaching(unittest.TestCase):
         exchange_message = b""
 
         def exchange_callback(msg, ack=None):
-            print("exchange callback called: ", msg)
             if isinstance(msg, ConsumeOK):
-                print("consume OK ctag: ", msg.consumer_tag)
+                pass
             nonlocal exchange_message
             exchange_message = msg
             exchange_callback_event.set()
@@ -654,9 +652,8 @@ class TestCaching(unittest.TestCase):
         second_exchange_message = b""
 
         def second_exchange_callback(msg, ack=None):
-            print("second exchange callback called: ", msg)
             if isinstance(msg, ConsumeOK):
-                print("consume OK ctag: ", msg.consumer_tag)
+                pass
             nonlocal second_exchange_message
             second_exchange_message = msg
             second_exchange_callback_event.set()

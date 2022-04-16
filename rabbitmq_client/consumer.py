@@ -2,6 +2,7 @@ import functools
 import logging
 
 from pika.exchange_type import ExchangeType
+from pika.frame import Method
 from typing import Union
 
 from rabbitmq_client.defs import (
@@ -91,10 +92,6 @@ class RMQConsumer(RMQConnection):
         self._ready = False
         self._consumes = dict()
 
-        self._declared_queues = set()
-        self._declared_exchanges = set()
-        self._consumed_queues = dict()
-
     @property
     def ready(self):
         """
@@ -131,10 +128,10 @@ class RMQConsumer(RMQConnection):
         super().stop()
 
     def consume(self,
-                consume_params,
-                queue_params=None,
-                exchange_params=None,
-                routing_key=None):
+                consume_params: ConsumeParams,
+                queue_params: QueueParams = None,
+                exchange_params: ExchangeParams = None,
+                routing_key: str = None):
         """
         General consumer interface, when wanting to consumer messages sent to a
         specific queue or exchange. Input parameters are a subset of those used
@@ -202,210 +199,89 @@ class RMQConsumer(RMQConnection):
         # 3. Start declaring shit
         if self.ready:
             self._handle_consume(consume_params,
-                                 queue_params,
-                                 exchange_params,
-                                 routing_key)
+                                 queue_params=queue_params,
+                                 exchange_params=exchange_params,
+                                 routing_key=routing_key)
 
         return consume_key
 
     def _handle_consume(self,
-                        consume_params,
-                        queue_params,
-                        exchange_params,
-                        routing_key):
-        """
-        :param consume_params: rabbitmq_client.ConsumeParams
-        :param queue_params: None | rabbitmq_client.QueueParams
-        :param exchange_params: None | rabbitmq_client.ExchangeParams
-        :param routing_key: None | str
-        """
+                        consume_params: ConsumeParams,
+                        queue_params: QueueParams = None,
+                        exchange_params: ExchangeParams = None,
+                        routing_key: str = None):
         if queue_params is None:
             queue_params = QueueParams("", exclusive=True)
 
-        if queue_params.queue in self._declared_queues:
-            consume_params.queue = queue_params.queue
+        cb = functools.partial(self.when_queue_declared,
+                               consume_params,
+                               queue_params,
+                               exchange_params=exchange_params,
+                               routing_key=routing_key)
+        self.declare_queue(queue_params, cb)
 
-            self.check_declare_exchange(consume_params,
-                                        queue_params,
-                                        exchange_params,
-                                        routing_key)
-
-        else:
-            cb = functools.partial(self.on_queue_declared,
-                                   consume_params=consume_params,
-                                   queue_params=queue_params,
-                                   exchange_params=exchange_params,
-                                   routing_key=routing_key)
-
-            self.declare_queue(queue_params, callback=cb)
-
-    def on_queue_declared(self,
-                          frame,
-                          consume_params=None,
-                          queue_params=None,
-                          exchange_params=None,
-                          routing_key=None):
-        """
-        :param frame: pika.frame.Method
-        :param consume_params: rabbitmq_client.ConsumeParams
-        :param queue_params: rabbitmq_client.QueueParams
-        :param exchange_params: rabbitmq_client.ExchangeParams
-        :param routing_key: str
-        """
-        LOGGER.info(f"declared queue: {frame.method.queue}")
-
-        self._declared_queues.add(frame.method.queue)
-
+    def when_queue_declared(self,
+                            consume_params: ConsumeParams,
+                            queue_params: QueueParams,
+                            queue_name: str,
+                            exchange_params: ExchangeParams = None,
+                            routing_key: str = None):
         # Update the consume queue name to ensure it is set to the created
         # queue's name in case of automatic name generation.
-        consume_params.queue = frame.method.queue
-
-        self.check_declare_exchange(consume_params,
-                                    queue_params,
-                                    exchange_params,
-                                    routing_key)
-
-    def check_declare_exchange(self,
-                               consume_params: ConsumeParams,
-                               queue_params: QueueParams,
-                               exchange_params: Union[ExchangeParams, None],
-                               routing_key: str):
-        if (
-                exchange_params is not None and
-                exchange_params.exchange in self._declared_exchanges
-        ):
-            self.handle_queue_binding(consume_params,
-                                      queue_params,
-                                      exchange_params,
-                                      routing_key)
-
-        elif exchange_params is not None:
-            cb = functools.partial(self.on_exchange_declared,
+        consume_params.queue = queue_name
+        if exchange_params is not None:
+            cb = functools.partial(self.when_exchange_declared,
+                                   consume_params,
+                                   queue_params,
                                    exchange_params,
-                                   consume_params=consume_params,
-                                   queue_params=queue_params,
                                    routing_key=routing_key)
-
-            self.declare_exchange(exchange_params, callback=cb)
+            self.declare_exchange(exchange_params, cb)
 
         else:
-            ctag = self.ongoing_consume(consume_params.queue)
-            if ctag is not None:
-                LOGGER.info(f"queue '{consume_params.queue}' "
-                            f"is already consumed from")
-                # Notify of ongoing consumer tag.
-                consume_params.on_message_callback(ConsumeOK(ctag))
-                # No need to consume again since the queue is already consumed
-                # from.
-                return
+            cb = functools.partial(self.when_consume_ok,
+                                   queue_params)
+            self.basic_consume(consume_params, self.on_msg, cb)
 
-            cb = functools.partial(self.on_consume_ok,
-                                   queue_params=queue_params)
-
-            self.basic_consume(consume_params,
-                               on_message_callback_override=self.on_msg,
-                               callback=cb)
-
-    def on_exchange_declared(self,
-                             exchange_params,
-                             _frame,
-                             consume_params=None,
-                             queue_params=None,
-                             routing_key=None):
-        """
-        :param exchange_params: rabbitmq_client.ExchangeParams
-        :param _frame: pika.frame.Method
-        :param consume_params: rabbitmq_client.ConsumeParams
-        :param queue_params: rabbitmq_client.QueueParams
-        :param routing_key: str
-        """
-        LOGGER.info(f"declared exchange: {exchange_params.exchange}")
-
-        self._declared_exchanges.add(exchange_params.exchange)
-
-        self.handle_queue_binding(consume_params,
-                                  queue_params,
-                                  exchange_params,
-                                  routing_key)
-
-    def handle_queue_binding(self,
-                             consume_params: ConsumeParams,
-                             queue_params: QueueParams,
-                             exchange_params: ExchangeParams,
-                             routing_key: str):
-        cb = functools.partial(self.on_queue_bound,
-                               consume_params=consume_params,
-                               queue_params=queue_params,
-                               exchange=exchange_params.exchange,
+    def when_exchange_declared(self,
+                               consume_params: ConsumeParams,
+                               queue_params: QueueParams,
+                               exchange_params: ExchangeParams,
+                               routing_key: str = None):
+        cb = functools.partial(self.when_queue_bound,
+                               consume_params,
+                               queue_params,
+                               exchange_params,
                                routing_key=routing_key)
-
         self.bind_queue(QueueBindParams(consume_params.queue,
                                         exchange_params.exchange,
                                         routing_key=routing_key),
-                        callback=cb)
+                        cb)
 
-    def on_queue_bound(self,
-                       _frame,
-                       consume_params=None,
-                       queue_params=None,
-                       exchange=None,
-                       routing_key=None):
-        """
-        :param _frame: pika.frame.Method
-        :param consume_params: rabbitmq_client.ConsumeParams
-        :param queue_params: rabbitmq_client.QueueParams
-        :param exchange: str
-        :param routing_key: str
-        """
-        LOGGER.info(f"queue {consume_params.queue} bound to exchange "
-                    f"{exchange}")
-
-        ctag = self.ongoing_consume(consume_params.queue)
-        if ctag is not None:
-            LOGGER.info(f"queue '{consume_params.queue}' "
-                        f"is already consumed from")
-            # Notify of ongoing consumer tag.
-            consume_params.on_message_callback(ConsumeOK(ctag))
-            # No need to consume again since the queue is already consumed
-            # from.
-            return
-
-        cb = functools.partial(self.on_consume_ok,
-                               queue_params=queue_params,
-                               exchange=exchange,
+    def when_queue_bound(self,
+                         consume_params: ConsumeParams,
+                         queue_params: QueueParams,
+                         exchange_params: ExchangeParams,
+                         _frame: Method,
+                         routing_key: str = None):
+        cb = functools.partial(self.when_consume_ok,
+                               queue_params,
+                               exchange_params=exchange_params,
                                routing_key=routing_key)
+        self.basic_consume(consume_params, self.on_msg, cb)
 
-        self.basic_consume(consume_params,
-                           on_message_callback_override=self.on_msg,
-                           callback=cb)
-
-    def ongoing_consume(self, queue: str) -> Union[str, None]:
-        return self._consumed_queues.get(queue)
-
-    def on_consume_ok(self,
-                      frame,
-                      queue_params=None,
-                      exchange=None,
-                      routing_key=None):
-        """
-        :param frame: pika.frame.Method
-        :param queue_params: rabbitmq_client.QueueParams
-        :param exchange: str
-        :param routing_key: str
-        """
-        LOGGER.info(f"consume OK for queue: {queue_params.queue}")
-
+    def when_consume_ok(self,
+                        queue_params: QueueParams,
+                        consumer_tag: str,
+                        exchange_params: ExchangeParams = None,
+                        routing_key: str = None):
         consume_instance = self._consumes[
             _gen_consume_key(queue=queue_params.queue,
-                             exchange=exchange,
+                             exchange=(exchange_params.exchange if
+                                       exchange_params else ""),
                              routing_key=routing_key)
         ]
         # Update with real consumer tag, may or may not be the same tag.
-        consume_instance.consumer_tag = frame.method.consumer_tag
-
-        self._consumed_queues[consume_instance.consume_params.queue] = (
-            consume_instance.consumer_tag
-        )
+        consume_instance.consumer_tag = consumer_tag
 
         # Enables lookup via consumer tag in 'on_msg'. These entries are
         # removed 'on_close' since the consumer tags may be refreshed on
@@ -479,12 +355,6 @@ class RMQConsumer(RMQConnection):
             LOGGER.info("consumer connection closed")
 
         self._ready = False
-
-        # Reset cached declarations, no way of knowing what's still around
-        # after a restart.
-        self._declared_queues = set()
-        self._declared_exchanges = set()
-        self._consumed_queues = dict()
 
         old_consumer_tags = list()
         for _key, consume in self._consumes.items():

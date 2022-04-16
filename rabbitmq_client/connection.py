@@ -1,7 +1,11 @@
+import functools
+
 import logging
 import pika
 
-from typing import Union
+from pika.frame import Method
+
+from typing import Union, Callable, Set, Dict
 from abc import ABC, abstractmethod
 from threading import Thread, Timer
 
@@ -13,8 +17,8 @@ from pika.exceptions import (
     ChannelClosedByBroker
 )
 
-from rabbitmq_client.defs import DEFAULT_EXCHANGE, PublishParams
-
+from rabbitmq_client.defs import DEFAULT_EXCHANGE, PublishParams, QueueParams, ExchangeParams, ConsumeParams, \
+    QueueBindParams
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,6 +48,38 @@ class DeclarationError:
 
 
 class RMQConnection(ABC):
+
+    class Cache:
+
+        def __init__(self):
+            self.queues: Set[str] = set()
+            self.exchanges: Set[str] = set()
+            self.consumer_tags: Dict[str, str] = dict()
+
+        def store(self, params: Union[QueueParams, ExchangeParams]):
+            if isinstance(params, QueueParams):
+                self.queues.add(params.queue)
+            elif isinstance(params, ExchangeParams):
+                self.exchanges.add(params.exchange)
+
+        def is_cached(self, params: Union[QueueParams, ExchangeParams]
+                      ) -> bool:
+            if isinstance(params, QueueParams):
+                return params.queue in self.queues
+            elif isinstance(params, ExchangeParams):
+                return params.exchange in self.exchanges
+
+        def link_consumer_tag(self, queue, consumer_tag):
+            self.consumer_tags[queue] = consumer_tag
+
+        def consumer_tag(self, consume_params: ConsumeParams) -> str:
+            return self.consumer_tags.get(consume_params.queue)
+
+        def clear(self):
+            self.queues = set()
+            self.exchanges = set()
+            self.consumer_tags = dict()
+
     """
     Abstract base class to be implemented.
 
@@ -72,6 +108,8 @@ class RMQConnection(ABC):
 
         self._closing = False
         self._restarting = False
+
+        self.cache = RMQConnection.Cache()
 
     @abstractmethod
     def on_ready(self):
@@ -148,49 +186,66 @@ class RMQConnection(ABC):
                 LOGGER.info("connection already closed")
 
     def declare_queue(self,
-                      queue_params,
-                      callback=None):
-        """
-        :param queue_params: rabbitmq_client.QueueParams
-        :param callback: callable
-        """
-        LOGGER.info(f"declaring queue: {queue_params.queue}")
+                      queue_params: QueueParams,
+                      callback: Callable):
+        if self.cache.is_cached(queue_params):
+            LOGGER.info(f"queue '{queue_params.queue}' already declared")
+            callback(queue_params.queue)
+        else:
+            LOGGER.info(f"declaring queue '{queue_params.queue}'")
+            cb = functools.partial(self.on_queue_declared,
+                                   queue_params,
+                                   callback)
+            self._channel.queue_declare(
+                queue_params.queue,
+                durable=queue_params.durable,
+                exclusive=queue_params.exclusive,
+                auto_delete=queue_params.auto_delete,
+                arguments=queue_params.arguments,
+                callback=cb
+            )
 
-        self._channel.queue_declare(
-            queue_params.queue,
-            durable=queue_params.durable,
-            exclusive=queue_params.exclusive,
-            auto_delete=queue_params.auto_delete,
-            arguments=queue_params.arguments,
-            callback=callback
-        )
+    def on_queue_declared(self,
+                          queue_params: QueueParams,
+                          callback: Callable,
+                          method_frame: Method):
+        LOGGER.info(f"queue '{method_frame.method.queue}' declared")
+        self.cache.store(queue_params)
+        callback(method_frame.method.queue)
 
     def declare_exchange(self,
-                         exchange_params,
-                         callback=None):
-        """
-        :param exchange_params: rabbitmq_client.ExchangeParams
-        :param callback: callable
-        """
-        LOGGER.info(f"declaring exchange: {exchange_params.exchange}")
+                         exchange_params: ExchangeParams,
+                         callback: Callable):
+        if self.cache.is_cached(exchange_params):
+            LOGGER.info(f"exchange '{exchange_params.exchange}' already "
+                        f"declared")
+            callback()
+        else:
+            LOGGER.info(f"declaring exchange '{exchange_params.exchange}'")
+            cb = functools.partial(self.on_exchange_declared,
+                                   exchange_params,
+                                   callback)
+            self._channel.exchange_declare(
+                exchange_params.exchange,
+                exchange_type=exchange_params.exchange_type,
+                durable=exchange_params.durable,
+                auto_delete=exchange_params.auto_delete,
+                internal=exchange_params.internal,
+                arguments=exchange_params.arguments,
+                callback=cb
+            )
 
-        self._channel.exchange_declare(
-            exchange_params.exchange,
-            exchange_type=exchange_params.exchange_type,
-            durable=exchange_params.durable,
-            auto_delete=exchange_params.auto_delete,
-            internal=exchange_params.internal,
-            arguments=exchange_params.arguments,
-            callback=callback
-        )
+    def on_exchange_declared(self,
+                             exchange_params: ExchangeParams,
+                             callback: Callable,
+                             _method_frame: Method):
+        LOGGER.info(f"exchange '{exchange_params.exchange}' declared")
+        self.cache.store(exchange_params)
+        callback()
 
     def bind_queue(self,
-                   queue_bind_params,
-                   callback=None):
-        """
-        :param queue_bind_params: rabbitmq_client.QueueBindParams
-        :param callback: callable
-        """
+                   queue_bind_params: QueueBindParams,
+                   callback: Callable):
         LOGGER.info(f"binding queue {queue_bind_params.queue} to exchange "
                     f"{queue_bind_params.exchange} with routing key: "
                     f"{queue_bind_params.routing_key}")
@@ -205,26 +260,36 @@ class RMQConnection(ABC):
 
     def basic_consume(self,
                       consume_params,
-                      on_message_callback_override=None,
-                      callback=None):
-        """
-        :param consume_params: rabbitmq_client.ConsumeParams
-        :param on_message_callback_override: callable
-        :param callback: callable
-        """
-        LOGGER.info(f"basic consumer starting for queue: "
-                    f"{consume_params.queue}")
+                      on_message_callback: Callable,
+                      callback: Callable):
+        consumer_tag = self.cache.consumer_tag(consume_params)
+        if consumer_tag is not None:
+            LOGGER.info("queue is already consumed")
+            callback(consumer_tag)
+        else:
+            LOGGER.info(f"consume starting for queue "
+                        f"'{consume_params.queue}'")
+            cb = functools.partial(self.on_consume_ok,
+                                   consume_params,
+                                   callback)
+            self._channel.basic_consume(
+                consume_params.queue,
+                on_message_callback,
+                auto_ack=consume_params.auto_ack,
+                exclusive=consume_params.exclusive,
+                consumer_tag=consume_params.consumer_tag,
+                arguments=consume_params.arguments,
+                callback=cb
+            )
 
-        self._channel.basic_consume(
-            consume_params.queue,
-            (on_message_callback_override if on_message_callback_override
-             else consume_params.on_message_callback),
-            auto_ack=consume_params.auto_ack,
-            exclusive=consume_params.exclusive,
-            consumer_tag=consume_params.consumer_tag,
-            arguments=consume_params.arguments,
-            callback=callback
-        )
+    def on_consume_ok(self,
+                      consume_params: ConsumeParams,
+                      callback: Callable,
+                      method_frame: Method):
+        LOGGER.info(f"consume started for queue '{consume_params.queue}'")
+        self.cache.link_consumer_tag(consume_params.queue,
+                                     method_frame.method.consumer_tag)
+        callback(method_frame.method.consumer_tag)
 
     def basic_publish(self,
                       body: bytes,
@@ -316,6 +381,8 @@ class RMQConnection(ABC):
         :param _connection: pika.SelectConnection
         :param reason: pika.exceptions.?
         """
+        self.cache.clear()
+
         permanent = False
 
         # This should ensure the current thread runs to completion after
@@ -323,13 +390,13 @@ class RMQConnection(ABC):
         self._connection.ioloop.stop()
 
         # Not something user-triggered, but good enough reason to re-connect
-        if not self._closing and type(reason) in RECONNECT_REASONS:
-            LOGGER.debug(f"connection closed: {reason}, attempting reconnect")
-            self._reconnect()
-
-        elif self._closing:
+        if self._closing:
             LOGGER.debug("connection closed")
             permanent = True
+
+        elif type(reason) in RECONNECT_REASONS:
+            LOGGER.debug(f"connection closed: {reason}, attempting reconnect")
+            self._reconnect()
 
         # We're restarting, gogo and restart
         elif self._restarting:
@@ -406,6 +473,8 @@ class RMQConnection(ABC):
         :param _channel: pika.channel.Channel
         :param reason: pika.exceptions.?
         """
+        self.cache.clear()
+
         permanent = False
         if self._closing:
             LOGGER.info("a client requested shutdown has closed the channel")
