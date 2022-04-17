@@ -371,7 +371,7 @@ class RMQConsumer(RMQConnection):
         """
         Connection hook, called when the connection has encountered an error.
         """
+        LOGGER.info("consumer connection error")
+
         if isinstance(error, DeclarationError):
-            LOGGER.warning(f"failed to declare something: {error.message}")
-        else:
-            LOGGER.error("an error occurred:", error)
+            LOGGER.error(f"failed to declare something: {error.message}")
