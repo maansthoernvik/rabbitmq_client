@@ -4,6 +4,9 @@ import logging
 import pika
 
 from pika.frame import Method
+from pika.channel import Channel
+from pika.spec import BasicProperties
+from pika.spec import Basic
 
 from typing import Union, Callable, Set, Dict
 from abc import ABC, abstractmethod
@@ -22,7 +25,8 @@ from rabbitmq_client.defs import (
     QueueParams,
     ExchangeParams,
     ConsumeParams,
-    QueueBindParams
+    QueueBindParams,
+    MandatoryError
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -37,13 +41,6 @@ RECONNECT_REASONS = (
 PERMANENT_CLOSURE_CODES = (
     405, 406
 )
-
-
-class MandatoryError:
-
-    def __init__(self, exchange: str, publish_key: str):
-        self.exchange = exchange
-        self.publish_key = publish_key
 
 
 class DeclarationError:
@@ -302,22 +299,18 @@ class RMQConnection(ABC):
                       body: bytes,
                       exchange: str,
                       routing_key: str,
-                      publish_params: PublishParams = None,
-                      publish_key: str = None):
+                      publish_params: PublishParams = None):
         LOGGER.debug(f"publishing to exchange: {exchange} and routing key: "
                      f"{routing_key}")
 
         if not publish_params:
             publish_params = PublishParams()  # Create defaults
 
-        try:
-            self._channel.basic_publish(exchange,
-                                        routing_key,
-                                        body,
-                                        properties=publish_params.properties,
-                                        mandatory=publish_params.mandatory)
-        except pika.exceptions.UnroutableError:
-            self.on_error(MandatoryError(exchange, publish_key))
+        self._channel.basic_publish(exchange,
+                                    routing_key,
+                                    body,
+                                    properties=publish_params.properties,
+                                    mandatory=publish_params.mandatory)
 
     def confirm_delivery(self, on_delivery_confirmed, callback=None):
         """
@@ -326,8 +319,20 @@ class RMQConnection(ABC):
         """
         LOGGER.info("activating confirm delivery mode")
 
+        self._channel.add_on_return_callback(self.on_return)
         self._channel.confirm_delivery(on_delivery_confirmed,
                                        callback=callback)
+
+    def on_return(self,
+                  _channel: Channel,
+                  method_frame: Basic.Return,
+                  _properties: BasicProperties,
+                  _body: bytes):
+        LOGGER.info(f"a message was returned for "
+                    f"exchange '{method_frame.exchange}' and "
+                    f"routing key '{method_frame.routing_key}'")
+        self.on_error(MandatoryError(method_frame.exchange,
+                                     method_frame.routing_key))
 
     def _connect(self):
         """

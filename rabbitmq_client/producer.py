@@ -180,7 +180,6 @@ class RMQProducer(RMQConnection):
                                   None
                               ]):
         if self.ready and self._confirm_delivery_callback is None:
-            LOGGER.info("activating confirm delivery mode")
             self.confirm_delivery(self.on_delivery_confirmed,
                                   callback=self.on_confirm_select_ok)
 
@@ -238,14 +237,15 @@ class RMQProducer(RMQConnection):
                           publish_key: Union[None, str] = None):
         if publish_key is not None:
             with self._publish_lock:
+                LOGGER.debug(f"delivering with tag {self._next_delivery_tag}")
+
                 self._unacked_publishes[self._next_delivery_tag] = publish_key
                 self._next_delivery_tag += 1
 
                 self.basic_publish(body,
                                    exchange,
                                    routing_key,
-                                   publish_params=publish_params,
-                                   publish_key=publish_key)
+                                   publish_params=publish_params)
         else:
             self.basic_publish(body,
                                exchange,
@@ -282,6 +282,8 @@ class RMQProducer(RMQConnection):
         """
         :param frame: pika.frame.Method
         """
+        LOGGER.debug(f"a delivery was confirmed: {frame.method.delivery_tag}")
+
         try:
             publish_key = self._unacked_publishes.pop(
                 frame.method.delivery_tag
@@ -337,11 +339,6 @@ class RMQProducer(RMQConnection):
         # the tag is reset.
         self._next_delivery_tag = 1
 
-        # Reset cached declarations, no way of knowing what's still around
-        # after a restart.
-        self._declared_queues = set()
-        self._declared_exchanges = set()
-
     def on_error(self, error: Union[MandatoryError, DeclarationError]):
         """
         Connection hook, called when the connection has encountered an error.
@@ -350,12 +347,11 @@ class RMQProducer(RMQConnection):
 
         if isinstance(error, MandatoryError):
             if self._confirm_delivery_callback is not None:
-                self._confirm_delivery_callback(
-                    DeliveryError(error.publish_key, mandatory=True)
-                )
+                self._confirm_delivery_callback(error)
             else:
-                LOGGER.warning(f"failed to publish to exchange "
-                               f"'{error.exchange}', no queue is bound to it")
+                LOGGER.error(f"failed to publish to "
+                             f"'{error.exchange}' + '{error.routing_key}', "
+                             f"no queue is bound to it")
 
         elif isinstance(error, DeclarationError):
-            LOGGER.warning(f"failed to declare something: {error.message}")
+            LOGGER.error(f"failed to declare something: {error.message}")

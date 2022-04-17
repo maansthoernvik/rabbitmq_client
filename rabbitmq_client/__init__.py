@@ -13,6 +13,7 @@ from rabbitmq_client.defs import (  # noqa
     ConfirmModeOK,
     DeliveryError,
     DEFAULT_EXCHANGE,
+    MandatoryError
 )
 
 

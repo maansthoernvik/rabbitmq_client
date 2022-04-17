@@ -155,6 +155,12 @@ class ConfirmModeOK:
 
 class DeliveryError:
 
-    def __init__(self, publish_key: str, mandatory: bool = False):
+    def __init__(self, publish_key: str):
         self.publish_key = publish_key
-        self.mandatory = mandatory
+
+
+class MandatoryError:
+
+    def __init__(self, exchange: str, routing_key: str):
+        self.exchange = exchange
+        self.routing_key = routing_key
