@@ -7,7 +7,7 @@ from pika.frame import Method
 
 from typing import Union, Callable, Set, Dict
 from abc import ABC, abstractmethod
-from threading import Thread, Timer, get_ident
+from threading import Thread, Timer
 
 from pika import SelectConnection
 from pika.exceptions import (
