@@ -1,4 +1,3 @@
-import threading
 import unittest
 
 from unittest.mock import patch, Mock, ANY, call

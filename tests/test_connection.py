@@ -604,7 +604,9 @@ class TestDeclarationCaching(unittest.TestCase):
         channel = Mock()
 
         # Test, queue is now cached :-)
-        self.conn_imp.on_exchange_declared(exchange_params, callback, method_frame)
+        self.conn_imp.on_exchange_declared(exchange_params,
+                                           callback,
+                                           method_frame)
         self.assertTrue(self.conn_imp.cache.is_cached(exchange_params))
 
         # Channel goes down, cache is cleared
@@ -620,16 +622,20 @@ class TestDeclarationCaching(unittest.TestCase):
         self.conn_imp._connection = connection
 
         # Test, queue is now cached :-)
-        self.conn_imp.on_exchange_declared(exchange_params, callback, method_frame)
+        self.conn_imp.on_exchange_declared(exchange_params,
+                                           callback,
+                                           method_frame)
         self.assertTrue(self.conn_imp.cache.is_cached(exchange_params))
 
     def test_cache_queue_declaration(self):
         # Setup
         queue_params = QueueParams("queue_name")
         callback_queue_name = "wrong name"
+
         def callback(queue_name: str):
             nonlocal callback_queue_name
             callback_queue_name = queue_name
+
         method_frame = Mock()
 
         # Test

@@ -1,9 +1,11 @@
-import pika
 import threading
 import time
 import unittest
 
+import pika
+
 from datetime import datetime
+from threading import Event
 
 from pika.exchange_type import ExchangeType
 
@@ -544,6 +546,12 @@ class TestConfirmMode(unittest.TestCase):
 class TestCaching(unittest.TestCase):
 
     def setUp(self) -> None:
+        # logger = logging.getLogger("rabbitmq_client")
+        # logger.setLevel(logging.DEBUG)
+        # stream_handler = logging.StreamHandler()
+        # stream_handler.setLevel(logging.DEBUG)
+        # logger.addHandler(stream_handler)
+
         self.consumer = RMQConsumer()
         self.consumer.start()
         self.assertTrue(started(self.consumer))
@@ -581,121 +589,64 @@ class TestCaching(unittest.TestCase):
         purge_confirmation.wait(timeout=2.0)
         client.stop()
 
-    def test_caching(self):
-        """
-        Verify caching does not interfere with consume flows (primarily) and
-        that messages are routed to callbacks as expected.
-        """
-        #
-        # Set up queue consume
-        queue_callback_event = threading.Event()
-        queue_message = b""
+    def test_caching_queue(self):
+        consume_ok = Event()
+        msg_gotten = Event()
+        msg_content = ""
 
-        def queue_callback(msg, ack=None):
+        def on_queue_message(msg, ack=None):
             if isinstance(msg, ConsumeOK):
-                pass
-            nonlocal queue_message
-            queue_message = msg
-            queue_callback_event.set()
+                consume_ok.set()
 
-        queue_consume_params = ConsumeParams(queue_callback,
-                                             auto_ack=True)
+                return
+
+            print("got message: ", msg)
+            nonlocal msg_content
+            msg_content = msg
+            msg_gotten.set()
+            ack()
+
+        consume_params = ConsumeParams(on_queue_message)
         queue_params = QueueParams("cached_queue")
+        exchange_params = ExchangeParams("cached_exchange")
 
-        self.consumer.consume(queue_consume_params, queue_params=queue_params)
-        self.assertTrue(queue_callback_event.wait(timeout=2.0))
-        self.assertTrue(isinstance(queue_message, ConsumeOK))
+        self.consumer.consume(consume_params, queue_params=queue_params)
+        self.assertTrue(consume_ok.wait(timeout=1.0))
+        consume_ok.clear()
 
-        # Clear the event and publish to the queue
-        queue_callback_event.clear()
-        self.producer.publish(b"queue_message", queue_params=queue_params)
+        # Publish #1
+        self.producer.publish(b"cached_queue body", queue_params=queue_params)
+        self.assertTrue(msg_gotten.wait(timeout=1.0))
+        self.assertEqual(msg_content, b"cached_queue body")
+        msg_gotten.clear()
 
-        # Verify message reception
-        self.assertTrue(queue_callback_event.wait(timeout=2.0))
-        self.assertEqual(queue_message, b"queue_message")
+        # Publish #2
+        self.producer.publish(b"another cached_queue body",
+                              queue_params=queue_params)
+        self.assertTrue(msg_gotten.wait(timeout=1.0))
+        self.assertEqual(msg_content, b"another cached_queue body")
+        msg_gotten.clear()
 
-        #
-        # Set up exchange consume
-        exchange_callback_event = threading.Event()
-        exchange_message = b""
-
-        def exchange_callback(msg, ack=None):
-            if isinstance(msg, ConsumeOK):
-                pass
-            nonlocal exchange_message
-            exchange_message = msg
-            exchange_callback_event.set()
-
-        exchange_consume_params = ConsumeParams(exchange_callback,
-                                                auto_ack=True)
-        direct_exchange_params = ExchangeParams("cached_exchange")
-
-        self.consumer.consume(exchange_consume_params,
-                              exchange_params=direct_exchange_params,
-                              routing_key="rk")
-        self.assertTrue(exchange_callback_event.wait(timeout=1.0))
-        self.assertTrue(isinstance(exchange_message, ConsumeOK))
-
-        # Clear the event and publish to the exchange
-        exchange_callback_event.clear()
-        self.producer.publish(b"exchange_message",
-                              exchange_params=direct_exchange_params,
-                              routing_key="rk")
-
-        # Verify message reception
-        self.assertTrue(exchange_callback_event.wait(timeout=1.0))
-        self.assertEqual(exchange_message, b"exchange_message")
-
-        #
-        # Consume from same exchange but different routing key
-        second_exchange_callback_event = threading.Event()
-        second_exchange_message = b""
-
-        def second_exchange_callback(msg, ack=None):
-            if isinstance(msg, ConsumeOK):
-                pass
-            nonlocal second_exchange_message
-            second_exchange_message = msg
-            second_exchange_callback_event.set()
-
-        second_exchange_consume_params = ConsumeParams(
-            second_exchange_callback, auto_ack=True
+        self.consumer.consume(
+            consume_params,
+            queue_params=queue_params,
+            exchange_params=ExchangeParams("cached_exchange"),
+            routing_key="routing_key"
         )
+        self.assertTrue(consume_ok.wait(timeout=1.0))
 
-        self.consumer.consume(second_exchange_consume_params,
-                              exchange_params=direct_exchange_params,
-                              routing_key="other_rk")
-        self.assertTrue(second_exchange_callback_event.wait(timeout=1.0))
-        self.assertTrue(isinstance(second_exchange_message, ConsumeOK))
+        # Publish #3 to cached_exchange with routing key: routing_key
+        self.producer.publish(b"cached_exchange+routing_key body",
+                              exchange_params=exchange_params,
+                              routing_key="routing_key")
+        self.assertTrue(msg_gotten.wait(timeout=1.0))
+        self.assertEqual(msg_content, b"cached_exchange+routing_key body")
+        msg_gotten.clear()
 
-        # Clear the event and publish to the exchange
-        second_exchange_callback_event.clear()
-        self.producer.publish(b"second_exchange_message",
-                              exchange_params=direct_exchange_params,
-                              routing_key="other_rk")
-
-        # Verify message reception
-        self.assertTrue(second_exchange_callback_event.wait(timeout=1.0))
-        self.assertEqual(second_exchange_message, b"second_exchange_message")
-
-        #
-        # Consume from other exchange but same queue
-        fanout_exchange_params = ExchangeParams(
-            "fanout_exchange", exchange_type=ExchangeType.fanout
-        )
-
-        queue_callback_event.clear()
-        self.consumer.consume(queue_consume_params,
-                              queue_params=queue_params,
-                              exchange_params=fanout_exchange_params)
-        self.assertTrue(queue_callback_event.wait(timeout=1.0))
-        self.assertTrue(isinstance(queue_message, ConsumeOK))
-
-        # Clear the event and publish to the exchange
-        queue_callback_event.clear()
-        self.producer.publish(b"fanout_exchange_message",
-                              exchange_params=fanout_exchange_params)
-
-        # Verify message reception
-        self.assertTrue(queue_callback_event.wait(timeout=1.0))
-        self.assertEqual(queue_message, b"fanout_exchange_message")
+        # Publish #4 to cached_exchange with routing key: routing_key
+        self.producer.publish(b"cached_exchange+routing_key body",
+                              exchange_params=exchange_params,
+                              routing_key="routing_key")
+        self.assertTrue(msg_gotten.wait(timeout=1.0))
+        self.assertEqual(msg_content, b"cached_exchange+routing_key body")
+        msg_gotten.clear()

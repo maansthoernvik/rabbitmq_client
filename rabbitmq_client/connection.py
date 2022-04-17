@@ -17,8 +17,13 @@ from pika.exceptions import (
     ChannelClosedByBroker
 )
 
-from rabbitmq_client.defs import DEFAULT_EXCHANGE, PublishParams, QueueParams, ExchangeParams, ConsumeParams, \
+from rabbitmq_client.defs import (
+    PublishParams,
+    QueueParams,
+    ExchangeParams,
+    ConsumeParams,
     QueueBindParams
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -264,7 +269,8 @@ class RMQConnection(ABC):
                       callback: Callable):
         consumer_tag = self.cache.consumer_tag(consume_params)
         if consumer_tag is not None:
-            LOGGER.info("queue is already consumed")
+            LOGGER.info(f"queue is already consumed from, consumer tag: "
+                        f"{consumer_tag}")
             callback(consumer_tag)
         else:
             LOGGER.info(f"consume starting for queue "
@@ -286,7 +292,8 @@ class RMQConnection(ABC):
                       consume_params: ConsumeParams,
                       callback: Callable,
                       method_frame: Method):
-        LOGGER.info(f"consume started for queue '{consume_params.queue}'")
+        LOGGER.info(f"consume started for queue '{consume_params.queue}' "
+                    f"consumer tag: {method_frame.method.consumer_tag}")
         self.cache.link_consumer_tag(consume_params.queue,
                                      method_frame.method.consumer_tag)
         callback(method_frame.method.consumer_tag)
