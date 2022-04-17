@@ -1,4 +1,3 @@
-import threading
 import unittest
 
 from unittest.mock import patch, Mock, ANY, call
@@ -120,7 +119,7 @@ class TestConsumeInterface(unittest.TestCase):
         self.assertEqual(consume_instance.consume_params, consume)
         self.assertEqual(consume_instance.queue_params, queue)
         self.assertEqual(consume_instance.exchange_params, None)
-        self.consumer.declare_queue.assert_called_with(queue, callback=ANY)
+        self.consumer.declare_queue.assert_called_with(queue, ANY)
 
     def test_consume_both_queue_and_exchange(self):
         """
@@ -146,7 +145,7 @@ class TestConsumeInterface(unittest.TestCase):
         self.assertEqual(consume_instance.consume_params, consume)
         self.assertEqual(consume_instance.queue_params, queue)
         self.assertEqual(consume_instance.exchange_params, exchange)
-        self.consumer.declare_queue.assert_called_with(queue, callback=ANY)
+        self.consumer.declare_queue.assert_called_with(queue, ANY)
 
     def test_consume_queue_exchange_and_routing_key(self):
         """
@@ -174,7 +173,7 @@ class TestConsumeInterface(unittest.TestCase):
         self.assertEqual(consume_instance.queue_params, queue)
         self.assertEqual(consume_instance.exchange_params, exchange)
         self.assertEqual(consume_instance.routing_key, "routing_key")
-        self.consumer.declare_queue.assert_called_with(queue, callback=ANY)
+        self.consumer.declare_queue.assert_called_with(queue, ANY)
 
     def test_consume_neither_queue_nor_exchange_provided(self):
         """
@@ -222,13 +221,13 @@ class TestConsumer(unittest.TestCase):
     def set_up_confirmed_consume(self, auto_ack=False) -> str:
         """Helper that sets up queue-only confirmed consume."""
         queue_params = QueueParams("queue")
-        self.consumer.consume(ConsumeParams(lambda _: ..., auto_ack=auto_ack),
+        consume_params = ConsumeParams(lambda _: ..., auto_ack=auto_ack)
+        consume_params.queue = "queue"
+        self.consumer.consume(consume_params,
                               queue_params=queue_params)
-        frame_mock = Mock()
-        frame_mock.method.consumer_tag = "123"
-        self.consumer.on_consume_ok(frame_mock, queue_params=queue_params)
+        self.consumer.when_consume_ok(queue_params, "consumer_tag")
 
-        return "123"
+        return "consumer_tag"
 
     def test_consumer_readiness(self):
         """Verify the consumer's ready property changes as expected."""
@@ -246,51 +245,49 @@ class TestConsumer(unittest.TestCase):
             MandatoryError("exchange", "this can't happen...")
         )
 
-    def test_on_queue_declared_no_exchange(self):
+    def test_when_queue_declared_no_exchange(self):
         """
         Verify that the correct action follows a successful queue declare.
         """
         # Prep
         self.consumer.basic_consume = Mock()
-        frame = Mock()
         consume_params = ConsumeParams(lambda _: ...)
         queue_params = QueueParams("queue")
 
         # Run test
-        self.consumer.on_queue_declared(frame,
-                                        consume_params=consume_params,
-                                        queue_params=queue_params)
+        self.consumer.when_queue_declared(consume_params,
+                                          queue_params,
+                                          "queue")
 
         # Assertions
         self.consumer.basic_consume.assert_called_with(
             consume_params,
-            on_message_callback_override=self.consumer.on_msg,
-            callback=ANY)
+            self.consumer.on_msg,
+            ANY)
 
-    def test_on_queue_declared_exchange(self):
+    def test_when_queue_declared_exchange(self):
         """
         Verify that the correct action follows a successful queue declare when
         exchange is specified.
         """
         # Prep
         self.consumer.declare_exchange = Mock()
-        frame = Mock()
         consume_params = ConsumeParams(lambda _: ...)
         queue_params = QueueParams("queue")
         exchange_params = ExchangeParams("exchange")
 
         # Run test
-        self.consumer.on_queue_declared(frame,
-                                        consume_params=consume_params,
-                                        queue_params=queue_params,
-                                        exchange_params=exchange_params)
+        self.consumer.when_queue_declared(consume_params,
+                                          queue_params,
+                                          "queue",
+                                          exchange_params=exchange_params)
 
         # Assertions
-        self.assertTrue(isinstance(consume_params.queue, Mock))
+        self.assertEqual(consume_params.queue, "queue")
         self.consumer.declare_exchange.assert_called_with(
-            exchange_params, callback=ANY)
+            exchange_params, ANY)
 
-    def test_on_exchange_declared(self):
+    def test_when_exchange_declared(self):
         """
         Verify that the correct action follows a successful exchange
         declaration.
@@ -302,47 +299,44 @@ class TestConsumer(unittest.TestCase):
         queue_params = QueueParams("queue")
 
         # Run test
-        self.consumer.on_exchange_declared(exchange_params,
-                                           None,
-                                           consume_params=consume_params,
-                                           queue_params=queue_params)
+        self.consumer.when_exchange_declared(consume_params,
+                                             queue_params,
+                                             exchange_params)
 
         # Assertions
         call_args = self.consumer.bind_queue.call_args
         queue_bind_params = call_args.args[0]
         self.consumer.bind_queue.assert_called_with(
-            queue_bind_params, callback=ANY
+            queue_bind_params, ANY
         )
         self.assertEqual(queue_bind_params.queue, consume_params.queue)
         self.assertEqual(queue_bind_params.exchange, exchange_params.exchange)
         self.assertEqual(queue_bind_params.routing_key, None)
 
-    def test_on_queue_bound(self):
+    def test_when_queue_bound(self):
         """
         Verify that the correct action follows a successful queue bind
         operation.
         """
         # Prep
         self.consumer.basic_consume = Mock()
-        frame = Mock()
         consume_params = ConsumeParams(lambda _: ...)
         queue_params = QueueParams("queue")
 
         # Run test
-        self.consumer.on_queue_bound(frame,
-                                     consume_params=consume_params,
-                                     queue_params=queue_params,
-                                     exchange="exchange",
-                                     routing_key=None)
+        self.consumer.when_queue_bound(consume_params,
+                                       queue_params,
+                                       ExchangeParams("exchange"),
+                                       Mock())
 
         # Assertions
         self.consumer.basic_consume.assert_called_with(
             consume_params,
-            on_message_callback_override=self.consumer.on_msg,
-            callback=ANY
+            self.consumer.on_msg,
+            ANY
         )
 
-    def test_on_consume_ok(self):
+    def test_when_consume_ok(self):
         """
         Verify that the correct actions follows a consume OK.
         """
@@ -358,19 +352,17 @@ class TestConsumer(unittest.TestCase):
 
         consume_params = ConsumeParams(on_message_callback)
         queue_params = QueueParams("queue")
-        frame = Mock()
         self.consumer.consume(consume_params, queue_params=queue_params)
 
         # Run test
-        self.consumer.on_consume_ok(frame,
-                                    queue_params=queue_params)
+        self.consumer.when_consume_ok(queue_params, "consumer_tag")
 
         # Assertions
         consume_instance = self.consumer._consumes[
             _gen_consume_key(queue=queue_params.queue)
         ]
         self.assertEqual(consume_instance.consumer_tag,
-                         frame.method.consumer_tag)
+                         "consumer_tag")
         self.assertTrue(on_message_callback_called)  # Called with ConsumeOK
 
     def test_on_ready_starts_consumes(self):
@@ -399,7 +391,7 @@ class TestConsumer(unittest.TestCase):
              call(ANY, None, exchange_params, None),)
         )
 
-    def test_on_consume_ok_callback_raises_exception(self):
+    def test_when_consume_ok_callback_raises_exception(self):
         """
         Verify that an exception raised from the consume OK notification does
         not crash the consumer.
@@ -417,12 +409,12 @@ class TestConsumer(unittest.TestCase):
 
         # Run test
         # Assertion is that no unhandled exception happens :-)
-        self.consumer.on_consume_ok(Mock(), queue_params=queue_params)
+        self.consumer.when_consume_ok(queue_params, "consumer_tag")
 
-    def test_on_consume_ok_on_close_consumes_entry_handling(self):
+    def test_when_consume_ok_on_close_consumes_entry_handling(self):
         """
-        Verify receiving a call to on_consume_ok creates as additional entry in
-        the _consumes dict to allow lookups of consume parameters using
+        Verify receiving a call to when_consume_ok creates as additional entry
+        in the _consumes dict to allow lookups of consume parameters using
         consumer tags, and that on_close causes the deletion of this entry.
         """
         # Prep
@@ -453,11 +445,9 @@ class TestConsumer(unittest.TestCase):
         queue_params = QueueParams("queue")
         self.consumer.consume(ConsumeParams(on_message_callback),
                               queue_params=queue_params)
-        frame_mock = Mock()
-        frame_mock.method.consumer_tag = "123"
-        self.consumer.on_consume_ok(frame_mock, queue_params=queue_params)
+        self.consumer.when_consume_ok(queue_params, "consumer tag")
         deliver_mock = Mock()
-        deliver_mock.consumer_tag = "123"
+        deliver_mock.consumer_tag = "consumer tag"
 
         # Run test
         self.consumer.on_msg(Mock(), deliver_mock, Mock(), b"body")
@@ -479,12 +469,9 @@ class TestConsumer(unittest.TestCase):
 
         self.consumer.consume(ConsumeParams(on_message_callback),
                               queue_params=QueueParams("queue"))
-        frame_mock = Mock()
-        frame_mock.method.consumer_tag = "123"
-        self.consumer.on_consume_ok(frame_mock,
-                                    queue_params=QueueParams("queue"))
+        self.consumer.when_consume_ok(QueueParams("queue"), "consumer tag")
         deliver_mock = Mock()
-        deliver_mock.consumer_tag = "123"
+        deliver_mock.consumer_tag = "consumer tag"
 
         # Run test, assertion is that no exception is uncaught
         self.consumer.on_msg(Mock(), deliver_mock, Mock(), b"body")
@@ -533,183 +520,3 @@ class TestConsumer(unittest.TestCase):
         self.consumer.on_msg(channel_mock, basic_deliver, Mock(), b"body")
 
         ack_mock.assert_called_with(delivery_tag=123)
-
-
-class TestCaching(unittest.TestCase):
-
-    @patch("rabbitmq_client.consumer.RMQConnection.start")
-    def setUp(self, _connection_start) -> None:
-        """Setup to run before each test case."""
-        self.consumer = RMQConsumer()
-        self.consumer.start()
-        self.consumer.on_ready()  # Fake connection getting ready
-
-        self.consumer.declare_queue = Mock()
-        self.consumer.declare_exchange = Mock()
-        self.consumer.bind_queue = Mock()
-        self.consumer.basic_consume = Mock()
-
-    def test_queue_cached(self):
-        consume_params = ConsumeParams(lambda msg: ...)
-        queue_params = QueueParams("queue")
-
-        # Signal queue has been declared
-        frame_mock = Mock()
-        frame_mock.method.queue = queue_params.queue
-        self.consumer.on_queue_declared(frame_mock,
-                                        consume_params=consume_params,
-                                        queue_params=queue_params)
-
-        # Consume and verify queue isn't declared
-        self.consumer.consume(consume_params,
-                              queue_params=queue_params,
-                              exchange_params=ExchangeParams(
-                                  "exchange",
-                                  exchange_type=ExchangeType.fanout))
-
-        self.consumer.declare_queue.assert_not_called()
-
-    def test_exchange_cached(self):
-        consume_params = ConsumeParams(lambda msg: ...)
-        exchange_params = ExchangeParams("exchange")
-
-        # Signal exchange has been declared
-        self.consumer.on_exchange_declared(exchange_params,
-                                           Mock(),
-                                           consume_params=consume_params)
-
-        # Signal queue declared to verify it would not lead to a
-        # re-declaration of the exchange.
-        self.consumer.on_queue_declared(Mock(),
-                                        consume_params=consume_params,
-                                        exchange_params=exchange_params)
-
-        self.consumer.declare_exchange.assert_not_called()
-
-    def test_queue_binding_when_exchange_already_declared(self):
-        consume_params = ConsumeParams(lambda msg: ...)
-        exchange_params = ExchangeParams("exchange")
-        queue_params = QueueParams("queue")
-
-        self.consumer.on_exchange_declared(exchange_params,
-                                           Mock(),
-                                           consume_params=consume_params)
-        self.consumer.bind_queue.reset_mock()
-
-        # Now check declare exchange and see that queue binding is done
-        self.consumer.check_declare_exchange(consume_params,
-                                             queue_params,
-                                             exchange_params,
-                                             "")
-
-        self.consumer.declare_exchange.assert_not_called()
-        self.consumer.bind_queue.assert_called()
-
-    def test_queue_already_consumed_from(self):
-        consume_ok = threading.Event()
-        ctag = "wrong"
-
-        def on_msg(m, a=None):
-            if isinstance(m, ConsumeOK):
-                consume_ok.set()
-                nonlocal ctag
-                ctag = m.consumer_tag
-
-        consume_params = ConsumeParams(on_msg)
-        queue_params = QueueParams("queue")
-        exchange_params = ExchangeParams("exchange",
-                                         exchange_type=ExchangeType.fanout)
-
-        # Signal queue has been declared and consume OK
-        self.consumer.consume(consume_params,
-                              queue_params=queue_params,
-                              exchange_params=exchange_params)
-        frame_mock = Mock()
-        frame_mock.method.queue = queue_params.queue
-        self.consumer.on_queue_declared(frame_mock,
-                                        consume_params=consume_params,
-                                        queue_params=queue_params,
-                                        exchange_params=exchange_params)
-        self.consumer.on_exchange_declared(exchange_params,
-                                           Mock(),
-                                           consume_params=consume_params,
-                                           queue_params=queue_params)
-        self.consumer.on_queue_bound(Mock(),
-                                     consume_params=consume_params,
-                                     queue_params=queue_params,
-                                     exchange=exchange_params.exchange)
-        self.consumer.basic_consume.assert_called()
-        frame_mock.method.consumer_tag = "ctag"
-        self.consumer.on_consume_ok(frame_mock,
-                                    queue_params=queue_params,
-                                    exchange=exchange_params.exchange)
-        self.assertTrue(consume_ok.wait())
-        self.assertEqual("ctag", ctag)
-
-        # Consume again and assume basic_consume isn't done again, but that the
-        # old callback received a ConsumeOK right away instead.
-        consume_ok.clear()
-        self.consumer.basic_consume.reset_mock()
-        ctag = "wrong"
-        self.consumer.consume(consume_params, queue_params=queue_params)
-
-        # The call should go right through immediately.
-        self.assertTrue(consume_ok.wait())
-        self.consumer.basic_consume.assert_not_called()
-        # This confirms the consume OK gotten contained the correct ctag.
-        self.assertEqual("ctag", ctag)
-
-    def test_queue_cache_dropped_on_connection_closed(self):
-        consume_params = ConsumeParams(lambda msg: ...)
-        queue_params = QueueParams("queue")
-
-        # Signal queue has been declared
-        frame_mock = Mock()
-        frame_mock.method.queue = queue_params.queue
-        self.consumer.on_queue_declared(frame_mock,
-                                        consume_params=consume_params,
-                                        queue_params=queue_params)
-
-        # Consume and verify queue isn't declared
-        self.consumer.consume(
-            consume_params,
-            queue_params=queue_params,
-            exchange_params=ExchangeParams(
-                "exchange", exchange_type=ExchangeType.fanout
-            )
-        )
-
-        self.consumer.declare_queue.assert_not_called()
-
-        # Connection closed, cache should be dropped
-        self.consumer.on_close()
-
-        # on_ready triggers re-consume, should lead to de-declaration
-        self.consumer.on_ready()
-        self.consumer.declare_queue.assert_called()
-
-    def test_exchange_cache_dropped_on_connection_closed(self):
-        consume_params = ConsumeParams(lambda msg: ...)
-        exchange_params = ExchangeParams("exchange")
-
-        # Signal exchange has been declared
-        self.consumer.on_exchange_declared(exchange_params,
-                                           Mock(),
-                                           consume_params=consume_params)
-
-        # Signal queue declared to verify it would not lead to a
-        # re-declaration of the exchange.
-        self.consumer.on_queue_declared(Mock(),
-                                        consume_params=consume_params,
-                                        exchange_params=exchange_params)
-
-        self.consumer.declare_exchange.assert_not_called()
-
-        # Connection closed, cache should be dropped
-        self.consumer.on_close()
-
-        # on_queue_declared triggers re-declare
-        self.consumer.on_queue_declared(Mock(),
-                                        consume_params=consume_params,
-                                        exchange_params=exchange_params)
-        self.consumer.declare_exchange.assert_called()

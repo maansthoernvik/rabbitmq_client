@@ -53,18 +53,16 @@ class TestProducer(unittest.TestCase):
         # Run test + assertions
         self.producer.publish(b"body", exchange_params=exchange_params)
         self.producer.declare_exchange.assert_called_with(
-            exchange_params, callback=ANY
+            exchange_params, ANY
         )
 
-        self.producer.on_exchange_declared(b"body",
-                                           exchange_params,
-                                           None,
-                                           routing_key="",
-                                           publish_params=None)
+        self.producer.when_exchange_declared(b"body",
+                                             exchange_params,
+                                             "")
         self.producer.basic_publish.assert_called_with(
             b"body",
-            exchange=exchange_params.exchange,
-            routing_key="",
+            exchange_params.exchange,
+            "",
             publish_params=None
         )
 
@@ -78,16 +76,15 @@ class TestProducer(unittest.TestCase):
         # Run test + assertions
         self.producer.publish(b"body", queue_params=queue_params)
         self.producer.declare_queue.assert_called_with(
-            queue_params, callback=ANY
+            queue_params, ANY
         )
 
-        self.producer.on_queue_declared(b"body",
-                                        frame_mock,
-                                        publish_params=None)
+        self.producer.when_queue_declared(b"body",
+                                          "queue")
         self.producer.basic_publish.assert_called_with(
             b"body",
-            exchange=DEFAULT_EXCHANGE,
-            routing_key=queue_params.queue,
+            DEFAULT_EXCHANGE,
+            queue_params.queue,
             publish_params=None
         )
 
@@ -129,18 +126,16 @@ class TestProducer(unittest.TestCase):
                               exchange_params=exchange_params,
                               routing_key=routing_key)
         self.producer.declare_exchange.assert_called_with(
-            exchange_params, callback=ANY
+            exchange_params, ANY
         )
 
-        self.producer.on_exchange_declared(b"body",
-                                           exchange_params,
-                                           None,
-                                           routing_key=routing_key,
-                                           publish_params=None)
+        self.producer.when_exchange_declared(b"body",
+                                             exchange_params,
+                                             routing_key)
         self.producer.basic_publish.assert_called_with(
             b"body",
-            exchange=exchange_params.exchange,
-            routing_key=routing_key,
+            exchange_params.exchange,
+            routing_key,
             publish_params=None
         )
 
@@ -159,18 +154,17 @@ class TestProducer(unittest.TestCase):
                               routing_key=routing_key,
                               publish_params=publish_params)
         self.producer.declare_exchange.assert_called_with(
-            exchange_params, callback=ANY
+            exchange_params, ANY
         )
 
-        self.producer.on_exchange_declared(b"body",
-                                           exchange_params,
-                                           None,
-                                           routing_key="",
-                                           publish_params=publish_params)
+        self.producer.when_exchange_declared(b"body",
+                                             exchange_params,
+                                             "",
+                                             publish_params=publish_params)
         self.producer.basic_publish.assert_called_with(
             b"body",
-            exchange=exchange_params.exchange,
-            routing_key="",
+            exchange_params.exchange,
+            "",
             publish_params=publish_params
         )
 
@@ -182,8 +176,6 @@ class TestProducer(unittest.TestCase):
         """
         # Prep
         exchange_params = ExchangeParams("exchange")
-        frame_mock = Mock()
-        frame_mock.method.queue = "queue"
         queue_params = QueueParams("queue")
 
         # Run test + assertions
@@ -195,10 +187,10 @@ class TestProducer(unittest.TestCase):
 
         self.producer.on_ready()
         self.producer.declare_exchange.assert_called_with(
-            exchange_params, callback=ANY
+            exchange_params, ANY
         )
         self.producer.declare_queue.assert_called_with(
-            queue_params, callback=ANY
+            queue_params, ANY
         )
 
 
@@ -269,23 +261,26 @@ class TestConfirmMode(unittest.TestCase):
         )
 
         self.producer.on_confirm_select_ok(None)
-        exchange_params = ExchangeParams("exchange")
 
         # Test
+        exchange_params = ExchangeParams("exchange")
         publish_key = self.producer.publish(
             b"body", exchange_params=exchange_params
         )
+        self.assertTrue(isinstance(publish_key, str))
 
         self.producer.declare_exchange.assert_called()
-        self.producer.on_exchange_declared(
-            b"body", exchange_params, None, publish_key=publish_key
+        self.producer.when_exchange_declared(
+            b"body", exchange_params, "", publish_key=publish_key
         )
         self.producer.basic_publish.assert_called_with(
-            b"body", exchange=exchange_params.exchange, routing_key="",
+            b"body", exchange_params.exchange, "",
             publish_params=ANY, publish_key=publish_key
         )
         # 1 is the delivery tag
-        self.assertEqual(self.producer._unacked_publishes[1], publish_key)
+        self.assertEqual(self.producer._unacked_publishes[
+                             self.producer._next_delivery_tag-1
+                         ], publish_key)
 
         frame = Mock()
         ack = Basic.Ack()
@@ -400,19 +395,21 @@ class TestConfirmMode(unittest.TestCase):
 
     def test_confirm_mode_unknown_delivery_tag(self):
         self.producer.activate_confirm_mode(lambda _: ...)
-        exchange_params = ExchangeParams("exchange")
 
         # Test + assertions
-        pub_key = self.producer.publish(b"body",
-                                        exchange_params=exchange_params)
-        self.producer.on_ready()  # -> confirm_mode
-        self.producer.on_confirm_select_ok(Mock())
-        self.producer.on_exchange_declared(b"body",
-                                           exchange_params,
-                                           Mock(),
-                                           publish_key=pub_key)
+        exchange_params = ExchangeParams("exchange")
+        publish_key = self.producer.publish(
+            b"body", exchange_params=exchange_params
+        )
+        self.assertTrue(isinstance(publish_key, str))
 
-        self.assertEqual(pub_key,
+        self.producer.on_confirm_select_ok(Mock())
+        self.producer.when_exchange_declared(b"body",
+                                             exchange_params,
+                                             "",
+                                             publish_key=publish_key)
+
+        self.assertEqual(publish_key,
                          self.producer._unacked_publishes[
                              self.producer._next_delivery_tag-1
                          ])
@@ -451,80 +448,3 @@ class TestConfirmMode(unittest.TestCase):
         No crashes when receiving a declaration error.
         """
         self.producer.on_error(DeclarationError("a message"))
-
-
-class TestCaching(unittest.TestCase):
-
-    @patch("rabbitmq_client.consumer.RMQConnection.start")
-    def setUp(self, _connection_start) -> None:
-        """Setup to run before each test case."""
-        self.producer = RMQProducer()
-        self.producer.start()
-        # To avoid exceptions when finalizing a produce
-        self.producer.on_channel_open(Mock())
-        self.producer.on_ready()  # Fake connection getting ready
-
-        self.producer.declare_queue = Mock()
-        self.producer.declare_exchange = Mock()
-        self.producer.bind_queue = Mock()
-        self.producer.basic_consume = Mock()
-
-    def test_queue_cached(self):
-        queue_params = QueueParams("queue")
-
-        frame_mock = Mock()
-        frame_mock.method.queue = queue_params.queue
-        self.producer.on_queue_declared(b"body", frame_mock)
-
-        # Verify a new publish does not lead to re-declaring the queue.
-        self.producer.publish(b"body", queue_params=queue_params)
-
-        self.producer.declare_queue.assert_not_called()
-
-    def test_exchange_cached(self):
-        exchange_params = ExchangeParams("exchange")
-
-        self.producer.on_exchange_declared(b"body", exchange_params, Mock())
-
-        # Verify a new publish does not lead to re-declaring the queue.
-        self.producer.publish(b"body", exchange_params=exchange_params)
-
-        self.producer.declare_exchange.assert_not_called()
-
-    def test_queue_cache_dropped_on_connection_closed(self):
-        queue_params = QueueParams("queue")
-
-        frame_mock = Mock()
-        frame_mock.method.queue = queue_params.queue
-        self.producer.on_queue_declared(b"body", frame_mock)
-
-        # Verify a new publish does not lead to re-declaring the queue.
-        self.producer.publish(b"body", queue_params=queue_params)
-
-        self.producer.declare_queue.assert_not_called()
-
-        # on_close should clear cache
-        self.producer.on_close()
-        self.producer.on_ready()  # ready to avoid publish buffering
-
-        # A new publish should lead to re-declaring the queue
-        self.producer.publish(b"body", queue_params=queue_params)
-        self.producer.declare_queue.assert_called()
-
-    def test_exchange_cache_dropped_on_connection_closed(self):
-        exchange_params = ExchangeParams("queue")
-
-        self.producer.on_exchange_declared(b"body", exchange_params, Mock())
-
-        # Verify a new publish does not lead to re-declaring the exchange.
-        self.producer.publish(b"body", exchange_params=exchange_params)
-
-        self.producer.declare_exchange.assert_not_called()
-
-        # on_close should clear cache
-        self.producer.on_close()
-        self.producer.on_ready()  # ready to avoid publish buffering
-
-        # A new publish should lead to re-declaring the queue
-        self.producer.publish(b"body", exchange_params=exchange_params)
-        self.producer.declare_exchange.assert_called()

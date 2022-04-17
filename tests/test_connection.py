@@ -1,7 +1,7 @@
 import pika.exceptions
 import unittest
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, ANY
 
 from pika.exceptions import (
     ConnectionClosedByBroker,
@@ -123,7 +123,8 @@ class TestConnectionBase(unittest.TestCase):
     @patch("rabbitmq_client.connection.SelectConnection")
     def test_connection_closed_stream_lost(self, _select_connection):
         """
-        Verify connection closed due to StreamLostError.
+        Verify connection closed due to StreamLostError, which leads to a
+        reconnect.
         """
         # Setup
         self.conn_imp.on_close = Mock()
@@ -145,11 +146,10 @@ class TestConnectionBase(unittest.TestCase):
     @patch("rabbitmq_client.connection.SelectConnection")
     def test_connection_closed_for_unknown_reason(self, _select_connection):
         """
-        Verify connection closed due to StreamLostError.
+        Verify connection closed due to some random error.
         """
         # Setup
         self.conn_imp.on_close = Mock()
-        self.conn_imp._reconnect = Mock()
         self.conn_imp.start()
         self.conn_imp.on_connection_open(None)
         self.conn_imp.on_channel_open(Mock())
@@ -393,7 +393,7 @@ class TestConnectionDeclarations(unittest.TestCase):
             exclusive=queue_params.exclusive,
             auto_delete=queue_params.auto_delete,
             arguments=queue_params.arguments,
-            callback=on_queue_declared
+            callback=ANY
         )
 
     def test_declare_exchange(self):
@@ -417,7 +417,7 @@ class TestConnectionDeclarations(unittest.TestCase):
             auto_delete=exchange_params.auto_delete,
             internal=exchange_params.internal,
             arguments=exchange_params.arguments,
-            callback=on_exchange_declared
+            callback=ANY
         )
 
     def test_bind_queue(self):
@@ -458,7 +458,7 @@ class TestConnectionDeclarations(unittest.TestCase):
         # Test
         self.conn_imp.basic_consume(
             consume_params,
-            on_message_callback_override=consumer_on_msg,
+            on_message_callback=consumer_on_msg,
             callback=on_consume_ok
         )
 
@@ -470,40 +470,13 @@ class TestConnectionDeclarations(unittest.TestCase):
             exclusive=consume_params.exclusive,
             consumer_tag=consume_params.consumer_tag,
             arguments=consume_params.arguments,
-            callback=on_consume_ok
-        )
-
-    def test_consume_from_queue_wo_override(self):
-        """
-        Verify consuming from a queue without the callback override.
-        """
-
-        # Prep
-        def consume_on_msg(): ...
-        consume_params = ConsumeParams(consume_on_msg)
-        def on_consume_ok(): ...
-
-        # Test
-        self.conn_imp.basic_consume(
-            consume_params,
-            callback=on_consume_ok
-        )
-
-        # Assert
-        self.conn_imp._channel.basic_consume.assert_called_with(
-            consume_params.queue,
-            consume_params.on_message_callback,
-            auto_ack=consume_params.auto_ack,
-            exclusive=consume_params.exclusive,
-            consumer_tag=consume_params.consumer_tag,
-            arguments=consume_params.arguments,
-            callback=on_consume_ok
+            callback=ANY
         )
 
     def test_basic_publish(self):
         """Verify calls to basic_publish are handled as expected."""
         # Test
-        self.conn_imp.basic_publish(b"body", routing_key="queue")
+        self.conn_imp.basic_publish(b"body", "", "queue")
 
         # Assert
         self.conn_imp._channel.basic_publish.assert_called_with(
@@ -536,3 +509,176 @@ class TestConnectionDeclarations(unittest.TestCase):
             properties=None,
             mandatory=True
         )
+
+
+class TestDeclarationCaching(unittest.TestCase):
+
+    @patch("rabbitmq_client.connection.SelectConnection")
+    def setUp(self, _select_connection) -> None:
+        self.conn_imp = ConnectionImplementer()
+
+    def test_ongoing_consume(self):
+        # Setup
+        def callback(_ct): ...
+        consume_params = ConsumeParams(lambda msg: ...)
+        consume_params.queue = "queue_name"
+        method_frame = Mock()
+        method_frame.method.consumer_tag = "123"
+
+        # Test
+        # consume started for queue_name
+        self.conn_imp.on_consume_ok(consume_params, callback, method_frame)
+        # second consume does nothing since for the same queue name, this
+        # should crash if the consume actually goes through since the channel
+        # is undefined.
+        self.conn_imp.basic_consume(consume_params, lambda: ..., callback)
+
+        # Assertions
+        self.assertEqual(
+            self.conn_imp.cache.consumer_tag(consume_params), "123"
+        )
+
+    def test_ongoing_consume_clears_at_channel_failure(self):
+        # Setup
+        def callback(_ct): ...
+        consume_params = ConsumeParams(lambda msg: ...)
+        consume_params.queue = "queue_name"
+        method_frame = Mock()
+        method_frame.method.consumer_tag = "123"
+
+        # Test
+        self.conn_imp.on_consume_ok(consume_params, callback, method_frame)
+        self.assertEqual(
+            self.conn_imp.cache.consumer_tag(consume_params), "123"
+        )
+        self.conn_imp.on_channel_closed(Mock(), StreamLostError())
+
+        # Assertions
+        self.assertEqual(
+            self.conn_imp.cache.consumer_tag(consume_params), None
+        )
+
+    @patch("rabbitmq_client.connection.Thread", new=NotAThread)
+    @patch("rabbitmq_client.connection.SelectConnection")
+    def test_ongoing_consume_clears_at_connection_failure(self, _select):
+        # Setup
+        def callback(_ct): ...
+        consume_params = ConsumeParams(lambda msg: ...)
+        consume_params.queue = "queue_name"
+        method_frame = Mock()
+        method_frame.method.consumer_tag = "123"
+        connection = Mock()
+        self.conn_imp._connection = connection
+
+        # Test
+        self.conn_imp.on_consume_ok(consume_params, callback, method_frame)
+        self.assertEqual(
+            self.conn_imp.cache.consumer_tag(consume_params), "123"
+        )
+        self.conn_imp.on_connection_closed(Mock(), StreamLostError())
+
+        # Assertions
+        self.assertEqual(
+            self.conn_imp.cache.consumer_tag(consume_params), None
+        )
+
+    def test_cache_exchange_declaration(self):
+        # Setup
+        exchange_params = ExchangeParams("exchange_name")
+        def callback(): ...
+        method_frame = Mock()
+
+        # Test
+        self.conn_imp.on_exchange_declared(exchange_params,
+                                           callback,
+                                           method_frame)
+        # this should fail if passes cache check, since channel isn't declared.
+        self.conn_imp.declare_exchange(exchange_params, callback)
+
+        # Assertions
+        self.assertTrue(self.conn_imp.cache.is_cached(exchange_params))
+
+    def test_cached_exchange_is_cleared_on_channel_failure(self):
+        # Setup
+        exchange_params = ExchangeParams("exchange_name")
+        def callback(): ...
+        method_frame = Mock()
+        channel = Mock()
+
+        # Test, queue is now cached :-)
+        self.conn_imp.on_exchange_declared(exchange_params,
+                                           callback,
+                                           method_frame)
+        self.assertTrue(self.conn_imp.cache.is_cached(exchange_params))
+
+        # Channel goes down, cache is cleared
+        self.conn_imp.on_channel_closed(channel, StreamLostError())
+        self.assertFalse(self.conn_imp.cache.is_cached(exchange_params))
+
+    def test_cached_exchange_is_cleared_on_connection_failure(self):
+        # Setup
+        exchange_params = ExchangeParams("exchange_name")
+        def callback(): ...
+        method_frame = Mock()
+        connection = Mock()
+        self.conn_imp._connection = connection
+
+        # Test, queue is now cached :-)
+        self.conn_imp.on_exchange_declared(exchange_params,
+                                           callback,
+                                           method_frame)
+        self.assertTrue(self.conn_imp.cache.is_cached(exchange_params))
+
+    def test_cache_queue_declaration(self):
+        # Setup
+        queue_params = QueueParams("queue_name")
+        callback_queue_name = "wrong name"
+
+        def callback(queue_name: str):
+            nonlocal callback_queue_name
+            callback_queue_name = queue_name
+
+        method_frame = Mock()
+
+        # Test
+        self.conn_imp.on_queue_declared(queue_params, callback, method_frame)
+        # this should fail if passes cache check, since channel isn't declared.
+        self.conn_imp.declare_queue(queue_params, callback)
+
+        # Assertions
+        self.assertTrue(self.conn_imp.cache.is_cached(queue_params))
+        self.assertEqual("queue_name", callback_queue_name)
+
+    def test_cached_queue_is_cleared_on_channel_failure(self):
+        # Setup
+        queue_params = QueueParams("queue_name")
+        def callback(queue_name: str): ...
+        method_frame = Mock()
+        channel = Mock()
+
+        # Test, queue is now cached :-)
+        self.conn_imp.on_queue_declared(queue_params, callback, method_frame)
+        self.assertTrue(self.conn_imp.cache.is_cached(queue_params))
+
+        # Channel goes down, cache is cleared
+        self.conn_imp.on_channel_closed(channel, StreamLostError())
+        self.assertFalse(self.conn_imp.cache.is_cached(queue_params))
+
+    @patch("rabbitmq_client.connection.Thread", new=NotAThread)
+    @patch("rabbitmq_client.connection.SelectConnection")
+    def test_cached_queue_is_cleared_on_connection_failure(self, _select):
+        # Setup
+        queue_params = QueueParams("queue_name")
+        def callback(queue_name: str): ...
+        method_frame = Mock()
+        connection = Mock()
+        self.conn_imp._connection = connection
+
+        # Test, queue is now cached :-)
+        self.conn_imp.on_queue_declared(queue_params, callback, method_frame)
+        self.assertTrue(self.conn_imp.cache.is_cached(queue_params))
+
+        # Channel goes down, cache is cleared
+        self.conn_imp.on_connection_closed(connection, StreamLostError())
+
+        self.assertFalse(self.conn_imp.cache.is_cached(queue_params))
