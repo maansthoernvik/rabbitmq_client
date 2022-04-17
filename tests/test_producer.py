@@ -274,8 +274,7 @@ class TestConfirmMode(unittest.TestCase):
             b"body", exchange_params, "", publish_key=publish_key
         )
         self.producer.basic_publish.assert_called_with(
-            b"body", exchange_params.exchange, "",
-            publish_params=ANY, publish_key=publish_key
+            b"body", exchange_params.exchange, "", publish_params=None
         )
         # 1 is the delivery tag
         self.assertEqual(self.producer._unacked_publishes[
@@ -421,12 +420,15 @@ class TestConfirmMode(unittest.TestCase):
         self.producer.on_delivery_confirmed(delivery_confirmed_frame)
 
     def test_on_error_leads_to_delivery_error_if_mandatory_failure(self):
-        mandatory_flag_set_in_delivery_error = False
+        mandatory_error = False
 
-        def confirm_delivery(tag: Union[str, ConfirmModeOK, DeliveryError]):
-            nonlocal mandatory_flag_set_in_delivery_error
-            if isinstance(tag, DeliveryError) and tag.mandatory:
-                mandatory_flag_set_in_delivery_error = True
+        def confirm_delivery(tag: Union[str,
+                                        ConfirmModeOK,
+                                        DeliveryError,
+                                        MandatoryError]):
+            nonlocal mandatory_error
+            if isinstance(tag, MandatoryError):
+                mandatory_error = True
 
         self.producer.activate_confirm_mode(confirm_delivery)
         self.producer.on_ready()  # -> confirm_mode
@@ -434,7 +436,7 @@ class TestConfirmMode(unittest.TestCase):
 
         # Some publish fails due to the mandatory flag being set
         self.producer.on_error(MandatoryError("exchange", "publish_key"))
-        self.assertTrue(mandatory_flag_set_in_delivery_error)
+        self.assertTrue(mandatory_error)
 
     def test_on_error_mandatory_error_works_outside_confirm_mode(self):
         """

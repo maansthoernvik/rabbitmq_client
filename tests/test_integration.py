@@ -1,3 +1,4 @@
+# import logging
 import threading
 import time
 import unittest
@@ -17,7 +18,9 @@ from rabbitmq_client import (
     QueueParams,
     ExchangeParams,
     ConsumeOK,
-    ConfirmModeOK
+    ConfirmModeOK,
+    PublishParams,
+    MandatoryError
 )
 
 
@@ -425,6 +428,12 @@ class TestIntegration(unittest.TestCase):
 class TestConfirmMode(unittest.TestCase):
 
     def setUp(self) -> None:
+        # logger = logging.getLogger("rabbitmq_client")
+        # logger.setLevel(logging.DEBUG)
+        # handler = logging.StreamHandler()
+        # handler.setLevel(logging.DEBUG)
+        # logger.addHandler(handler)
+
         self.consumer = RMQConsumer()
         self.consumer.start()
         self.assertTrue(started(self.consumer))
@@ -550,6 +559,89 @@ class TestConfirmMode(unittest.TestCase):
 
         # Stop the extra producer
         producer.stop()
+
+    def test_mandatory_flag_on_when_queue_bound(self):
+        confirm_mode_on = threading.Event()
+        msg_confirmed = threading.Event()
+        mandatory_error = False
+        confirmed_publish_key = None
+
+        def on_confirm(confirm):
+            if isinstance(confirm, ConfirmModeOK):
+                confirm_mode_on.set()
+
+                return
+            elif isinstance(confirm, MandatoryError):
+                nonlocal mandatory_error
+                mandatory_error = True
+
+                return
+
+            nonlocal confirmed_publish_key
+            confirmed_publish_key = confirm
+            msg_confirmed.set()
+
+        # Activate confirm mode and await completion
+        self.producer.activate_confirm_mode(on_confirm)
+        self.assertTrue(confirm_mode_on.wait(timeout=1.0))
+
+        # Publish a non-mandatory message to ensure confirm mode works.
+        publish_key = self.producer.publish(
+            b"direct exchange body",
+            exchange_params=ExchangeParams("exchange_direct"),
+        )
+        self.assertTrue(msg_confirmed.wait(timeout=1.0))
+        self.assertEqual(confirmed_publish_key, publish_key)
+        msg_confirmed.clear()
+
+        # Bind a queue to exchange_direct
+        consume_ok = threading.Event()
+        msg_received = threading.Event()
+        msg_content = None
+
+        def on_msg(msg, ack=None):
+            if isinstance(msg, ConsumeOK):
+                consume_ok.set()
+
+                return
+
+            nonlocal msg_content
+            msg_content = msg
+            ack()
+            msg_received.set()
+
+        self.consumer.consume(ConsumeParams(on_msg),
+                              queue_params=QueueParams(
+                                  "mandatory_queue",
+                                  auto_delete=True
+                              ),
+                              exchange_params=ExchangeParams(
+                                  "exchange_direct"
+                              ),
+                              routing_key="mandatory_routing_key")
+        self.assertTrue(consume_ok.wait(timeout=1.0))
+
+        # Publish a mandatory message to the exchange and observe no returned
+        # messages since the a queue is bound to the exchange
+        publish_key = self.producer.publish(
+            b"direct exchange body",
+            publish_params=PublishParams(mandatory=True),
+            exchange_params=ExchangeParams("exchange_direct",
+                                           durable=True,
+                                           auto_delete=False),
+            routing_key="mandatory_routing_key"
+        )
+
+        # Verify no mandatory error happened, Basic.Return should happen before
+        # Basic.Ack.
+        self.assertTrue(msg_confirmed.wait(timeout=1.0))
+        self.assertEqual(confirmed_publish_key, publish_key)
+        self.assertFalse(mandatory_error)
+
+        self.assertTrue(msg_received.wait(timeout=1.0))
+        self.assertEqual(msg_content, b"direct exchange body")
+
+    # def test_mandatory_flag_on_when_queue_unbound(self):
 
 
 class TestCaching(unittest.TestCase):
