@@ -16,15 +16,9 @@ from rabbitmq_client import (
 )
 
 
-# noinspection DuplicatedCode
-class TestProducer(unittest.TestCase):
-    """
-    Test the RMQProducer implementation, which implements the RMQConnection
-    interface.
-    """
+class TestPublishInterface(unittest.TestCase):
 
-    @patch("rabbitmq_client.producer.RMQProducer.start")
-    def setUp(self, _connection_start) -> None:
+    def setUp(self) -> None:
         """Setup to run before each test case."""
         self.producer = RMQProducer()
         self.producer.start()
@@ -34,16 +28,6 @@ class TestProducer(unittest.TestCase):
         self.producer.declare_exchange = Mock()
         self.producer.bind_queue = Mock()
         self.producer.basic_publish = Mock()
-
-    def test_producer_readiness(self):
-        """Verify the producer ready property changes appropriately."""
-        self.assertTrue(self.producer.ready)
-        self.producer.on_close()
-        self.assertFalse(self.producer.ready)
-        self.producer.on_ready()
-        self.assertTrue(self.producer.ready)
-        self.producer.on_close(permanent=True)
-        self.assertFalse(self.producer.ready)
 
     def test_publish_using_exchange_params(self):
         """Verify possibility to publish to an exchange."""
@@ -168,6 +152,36 @@ class TestProducer(unittest.TestCase):
             publish_params=publish_params
         )
 
+
+# noinspection DuplicatedCode
+class TestProducer(unittest.TestCase):
+    """
+    Test the RMQProducer implementation, which implements the RMQConnection
+    interface.
+    """
+
+    @patch("rabbitmq_client.producer.RMQProducer.start")
+    def setUp(self, _connection_start) -> None:
+        """Setup to run before each test case."""
+        self.producer = RMQProducer()
+        self.producer.start()
+        self.producer.on_ready()  # Fake connection getting ready
+
+        self.producer.declare_queue = Mock()
+        self.producer.declare_exchange = Mock()
+        self.producer.bind_queue = Mock()
+        self.producer.basic_publish = Mock()
+
+    def test_producer_readiness(self):
+        """Verify the producer ready property changes appropriately."""
+        self.assertTrue(self.producer.ready)
+        self.producer.on_close()
+        self.assertFalse(self.producer.ready)
+        self.producer.on_ready()
+        self.assertTrue(self.producer.ready)
+        self.producer.on_close(permanent=True)
+        self.assertFalse(self.producer.ready)
+
     def test_publish_is_delayed_until_producer_connection_ready(self):
         """
         Verify that the producer buffers messages that are to be sent when the
@@ -209,6 +223,16 @@ class TestConfirmMode(unittest.TestCase):
         self.producer.confirm_delivery = Mock()
         self.producer.declare_exchange = Mock()
         self.producer.basic_publish = Mock()
+
+    def test_push_confirm_mode_active_using_connection_hooks(self):
+        self.assertFalse(self.producer._confirm_mode_active)
+
+        self.producer.activate_confirm_mode(lambda _: ...)
+        self.producer.on_confirm_select_ok(Mock())
+        self.assertTrue(self.producer._confirm_mode_active)
+
+        self.producer.on_close()
+        self.assertFalse(self.producer._confirm_mode_active)
 
     def test_activate_confirm_mode(self):
         """
