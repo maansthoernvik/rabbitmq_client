@@ -7,7 +7,7 @@ from pika.frame import Method
 
 from typing import Union, Callable, Set, Dict
 from abc import ABC, abstractmethod
-from threading import Thread, Timer
+from threading import Thread, Timer, get_ident
 
 from pika import SelectConnection
 from pika.exceptions import (
@@ -442,7 +442,6 @@ class RMQConnection(ABC):
                                          daemon=True)
         if self._reconnect_delay == 0:  # retry immediately the first time
             self._connection_thread.start()
-
         else:  # calculate backoff timer
             timer = Timer(
                 self._reconnect_delay,

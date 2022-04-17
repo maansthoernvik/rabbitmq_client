@@ -1,6 +1,7 @@
 import threading
 import time
 import unittest
+import warnings
 
 import pika
 
@@ -42,6 +43,8 @@ class TestAcknowledgements(unittest.TestCase):
         self.producer = RMQProducer()
         self.producer.start()
         self.assertTrue(started(self.producer))
+
+        warnings.simplefilter("ignore", ResourceWarning)
 
     def tearDown(self) -> None:
         self.consumer.stop()
@@ -177,6 +180,8 @@ class TestIntegration(unittest.TestCase):
         self.producer.start()
         self.assertTrue(started(self.producer))
 
+        warnings.simplefilter("ignore", ResourceWarning)
+
     def tearDown(self) -> None:
         self.consumer.stop()
         self.producer.stop()
@@ -224,6 +229,7 @@ class TestIntegration(unittest.TestCase):
         self.consumer.stop()
 
         thread_count = len(threading.enumerate())
+
         # Only MainThread should still be running.
         self.assertEqual(2, thread_count)
 
@@ -236,6 +242,7 @@ class TestIntegration(unittest.TestCase):
         self.producer.stop()
 
         thread_count = len(threading.enumerate())
+
         # Only MainThread should still be running.
         self.assertEqual(2, thread_count)
 
@@ -426,6 +433,8 @@ class TestConfirmMode(unittest.TestCase):
         self.producer.start()
         self.assertTrue(started(self.producer))
 
+        warnings.simplefilter("ignore", ResourceWarning)
+
     def tearDown(self) -> None:
         self.consumer.stop()
         self.producer.stop()
@@ -560,6 +569,8 @@ class TestCaching(unittest.TestCase):
         self.producer.start()
         self.assertTrue(started(self.producer))
 
+        warnings.simplefilter("ignore", ResourceWarning)
+
     def tearDown(self) -> None:
         self.consumer.stop()
         self.producer.stop()
@@ -600,7 +611,6 @@ class TestCaching(unittest.TestCase):
 
                 return
 
-            print("got message: ", msg)
             nonlocal msg_content
             msg_content = msg
             msg_gotten.set()

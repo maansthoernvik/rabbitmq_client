@@ -558,7 +558,9 @@ class TestDeclarationCaching(unittest.TestCase):
             self.conn_imp.cache.consumer_tag(consume_params), None
         )
 
-    def test_ongoing_consume_clears_at_connection_failure(self):
+    @patch("rabbitmq_client.connection.Thread", new=NotAThread)
+    @patch("rabbitmq_client.connection.SelectConnection")
+    def test_ongoing_consume_clears_at_connection_failure(self, _select):
         # Setup
         def callback(_ct): ...
         consume_params = ConsumeParams(lambda msg: ...)
@@ -662,7 +664,9 @@ class TestDeclarationCaching(unittest.TestCase):
         self.conn_imp.on_channel_closed(channel, StreamLostError())
         self.assertFalse(self.conn_imp.cache.is_cached(queue_params))
 
-    def test_cached_queue_is_cleared_on_connection_failure(self):
+    @patch("rabbitmq_client.connection.Thread", new=NotAThread)
+    @patch("rabbitmq_client.connection.SelectConnection")
+    def test_cached_queue_is_cleared_on_connection_failure(self, _select):
         # Setup
         queue_params = QueueParams("queue_name")
         def callback(queue_name: str): ...
@@ -676,4 +680,5 @@ class TestDeclarationCaching(unittest.TestCase):
 
         # Channel goes down, cache is cleared
         self.conn_imp.on_connection_closed(connection, StreamLostError())
+
         self.assertFalse(self.conn_imp.cache.is_cached(queue_params))
