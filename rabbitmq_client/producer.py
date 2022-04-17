@@ -1,9 +1,8 @@
-from typing import Callable, Union
-
 import functools
 import logging
 import uuid
 
+from typing import Callable, Union
 from threading import Lock
 
 from pika.spec import Basic
@@ -16,7 +15,10 @@ from rabbitmq_client.connection import (
 from rabbitmq_client.defs import (
     ConfirmModeOK,
     DeliveryError,
-    DEFAULT_EXCHANGE
+    DEFAULT_EXCHANGE,
+    QueueParams,
+    ExchangeParams,
+    PublishParams
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -60,9 +62,6 @@ class RMQProducer(RMQConnection):
         super().__init__(connection_parameters=connection_parameters)
 
         self._ready = False
-
-        self._declared_queues = set()
-        self._declared_exchanges = set()
 
         self._buffered_messages = list()
 
@@ -109,11 +108,11 @@ class RMQProducer(RMQConnection):
         super().stop()
 
     def publish(self,
-                body,
-                exchange_params=None,
-                routing_key="",
-                queue_params=None,
-                publish_params=None):
+                body: bytes,
+                publish_params: PublishParams = None,
+                queue_params: QueueParams = None,
+                exchange_params: ExchangeParams = None,
+                routing_key: str = "") -> Union[None, str]:
         """
         Publish 'body' towards an exchange (optional routing key) or a queue.
         You must provide EITHER exchange_params OR queue_params to handle
@@ -132,13 +131,6 @@ class RMQProducer(RMQConnection):
         been sent successfully by waiting for their key to be referred to in
         a call to their confirm mode notify callback where the input parameter
         == the generated publish key.
-
-        :param body: bytes
-        :param exchange_params: rabbitmq_client.ExchangeParams
-        :param routing_key: str
-        :param queue_params: rabbitmq_client.QueueParams
-        :param publish_params: rabbitmq_client.PublishParams
-        :returns: str
         """
         # More detailed logging done on connection level
         LOGGER.info("publishing")
@@ -165,12 +157,11 @@ class RMQProducer(RMQConnection):
                 )
         ):
             self._handle_publish(body,
-                                 exchange_params,
-                                 routing_key,
-                                 queue_params,
-                                 publish_params,
-                                 publish_key)
-
+                                 publish_params=publish_params,
+                                 queue_params=queue_params,
+                                 exchange_params=exchange_params,
+                                 routing_key=routing_key,
+                                 publish_key=publish_key)
         else:
             self._buffered_messages.append(
                 RMQPublish(body,
@@ -196,95 +187,43 @@ class RMQProducer(RMQConnection):
         self._confirm_delivery_callback = notify_callback
 
     def _handle_publish(self,
-                        body,
-                        exchange_params,
-                        routing_key,
-                        queue_params,
-                        publish_params,
-                        publish_key):
-        """
-        :param body: bytes
-        :param exchange_params: rabbitmq_client.ExchangeParams
-        :param routing_key: str
-        :param queue_params: rabbitmq_client.QueueParams
-        :param publish_params: rabbitmq_client.PublishParams
-        :param publish_key: str
-        """
-        if (
-                queue_params and
-                queue_params.queue not in self._declared_queues
-        ):
-
-            cb = functools.partial(self.on_queue_declared,
+                        body: bytes,
+                        publish_params: PublishParams = None,
+                        queue_params: QueueParams = None,
+                        exchange_params: ExchangeParams = None,
+                        routing_key: str = "",
+                        publish_key: Union[None, str] = None):
+        if queue_params:
+            cb = functools.partial(self.when_queue_declared,
                                    body,
                                    publish_params=publish_params,
                                    publish_key=publish_key)
-
-            self.declare_queue(queue_params, callback=cb)
-
-        elif (
-                exchange_params and
-                exchange_params.exchange not in self._declared_exchanges
-        ):
-            cb = functools.partial(self.on_exchange_declared,
+            self.declare_queue(queue_params, cb)
+        else:
+            cb = functools.partial(self.when_exchange_declared,
                                    body,
                                    exchange_params,
-                                   routing_key=routing_key,
+                                   routing_key,
                                    publish_params=publish_params,
                                    publish_key=publish_key)
+            self.declare_exchange(exchange_params, cb)
 
-            self.declare_exchange(exchange_params, callback=cb)
-
-        else:  # Declarations are already complete.
-            self._finalize_publish(
-                body,
-                exchange=(DEFAULT_EXCHANGE if exchange_params is None
-                          else exchange_params.exchange),
-                routing_key=(routing_key if queue_params is None
-                             else queue_params.queue),
-                publish_params=publish_params,
-                publish_key=publish_key
-            )
-
-    def on_queue_declared(self,
-                          body,
-                          frame,
-                          publish_params=None,
-                          publish_key=None):
-        """
-        :param body: bytes
-        :param frame: pika.frame.Method
-        :param publish_params: rabbitmq_client.PublishParams
-        :param publish_key: str
-        """
-        LOGGER.info(f"declared queue: {frame.method.queue}")
-
-        self._declared_queues.add(frame.method.queue)
-
+    def when_queue_declared(self,
+                            body: bytes,
+                            queue_name: str,
+                            publish_params: PublishParams = None,
+                            publish_key: Union[None, str] = None):
         self._finalize_publish(body,
-                               routing_key=frame.method.queue,
+                               routing_key=queue_name,
                                publish_params=publish_params,
                                publish_key=publish_key)
 
-    def on_exchange_declared(self,
-                             body,
-                             exchange_params,
-                             _frame,
-                             routing_key="",
-                             publish_params=None,
-                             publish_key=None):
-        """
-        :param body: bytes
-        :param exchange_params: rabbitmq_client.ExchangeParams
-        :param _frame: pika.frame.Method
-        :param routing_key: str
-        :param publish_params: rabbitmq_client.PublishParams
-        :param publish_key: str
-        """
-        LOGGER.info(f"declared exchange: {exchange_params.exchange}")
-
-        self._declared_exchanges.add(exchange_params.exchange)
-
+    def when_exchange_declared(self,
+                               body: bytes,
+                               exchange_params: ExchangeParams,
+                               routing_key: str,
+                               publish_params: PublishParams = None,
+                               publish_key: Union[None, str] = None):
         self._finalize_publish(body,
                                exchange=exchange_params.exchange,
                                routing_key=routing_key,
@@ -293,33 +232,24 @@ class RMQProducer(RMQConnection):
 
     def _finalize_publish(self,
                           body,
-                          exchange=DEFAULT_EXCHANGE,
-                          routing_key="",
-                          publish_params=None,
-                          publish_key=None):
-        """
-        :param body: bytes
-        :param exchange: str
-        :param routing_key: str
-        :param publish_params: rabbitmq_client.PublishParams
-        :param publish_key: str
-        """
-
+                          exchange: str = DEFAULT_EXCHANGE,
+                          routing_key: str = "",
+                          publish_params: PublishParams = None,
+                          publish_key: Union[None, str] = None):
         if publish_key is not None:
             with self._publish_lock:
                 self._unacked_publishes[self._next_delivery_tag] = publish_key
                 self._next_delivery_tag += 1
 
                 self.basic_publish(body,
-                                   exchange=exchange,
-                                   routing_key=routing_key,
+                                   exchange,
+                                   routing_key,
                                    publish_params=publish_params,
                                    publish_key=publish_key)
-
         else:
             self.basic_publish(body,
-                               exchange=exchange,
-                               routing_key=routing_key,
+                               exchange,
+                               routing_key,
                                publish_params=publish_params)
 
     def _empty_buffered_messages(self):
@@ -327,12 +257,14 @@ class RMQProducer(RMQConnection):
         Sends all buffered messages.
         """
         for buffered_message in self._buffered_messages:
-            self._handle_publish(buffered_message.body,
-                                 buffered_message.exchange_params,
-                                 buffered_message.routing_key,
-                                 buffered_message.queue_params,
-                                 buffered_message.publish_params,
-                                 buffered_message.publish_key)
+            self._handle_publish(
+                buffered_message.body,
+                publish_params=buffered_message.publish_params,
+                queue_params=buffered_message.queue_params,
+                exchange_params=buffered_message.exchange_params,
+                routing_key=buffered_message.routing_key,
+                publish_key=buffered_message.publish_key
+            )
 
         self._buffered_messages = list()
 

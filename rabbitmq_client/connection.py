@@ -293,8 +293,8 @@ class RMQConnection(ABC):
 
     def basic_publish(self,
                       body: bytes,
-                      exchange: str = DEFAULT_EXCHANGE,
-                      routing_key: str = "",
+                      exchange: str,
+                      routing_key: str,
                       publish_params: PublishParams = None,
                       publish_key: str = None):
         LOGGER.debug(f"publishing to exchange: {exchange} and routing key: "

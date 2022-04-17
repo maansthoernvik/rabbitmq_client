@@ -476,7 +476,7 @@ class TestConnectionDeclarations(unittest.TestCase):
     def test_basic_publish(self):
         """Verify calls to basic_publish are handled as expected."""
         # Test
-        self.conn_imp.basic_publish(b"body", routing_key="queue")
+        self.conn_imp.basic_publish(b"body", "", "queue")
 
         # Assert
         self.conn_imp._channel.basic_publish.assert_called_with(
