@@ -319,9 +319,9 @@ class RMQConnection(ABC):
         """
         LOGGER.info("activating confirm delivery mode")
 
+        self._channel.add_on_return_callback(self.on_return)
         self._channel.confirm_delivery(on_delivery_confirmed,
                                        callback=callback)
-        self._channel.add_on_return_callback(self.on_return)
 
     def on_return(self,
                   _channel: Channel,

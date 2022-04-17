@@ -641,7 +641,27 @@ class TestConfirmMode(unittest.TestCase):
         self.assertTrue(msg_received.wait(timeout=1.0))
         self.assertEqual(msg_content, b"direct exchange body")
 
-    # def test_mandatory_flag_on_when_queue_unbound(self):
+    def test_mandatory_flag_on_when_queue_unbound(self):
+        confirm_mode_on = threading.Event()
+        mandatory_error = threading.Event()
+
+        def on_confirm(confirm):
+            if isinstance(confirm, ConfirmModeOK):
+                confirm_mode_on.set()
+            elif isinstance(confirm, MandatoryError):
+                mandatory_error.set()
+
+        # Activate confirm mode and await completion
+        self.producer.activate_confirm_mode(on_confirm)
+        self.assertTrue(confirm_mode_on.wait(timeout=1.0))
+
+        # Publish a non-mandatory message to ensure confirm mode works.
+        self.producer.publish(
+            b"direct exchange body",
+            publish_params=PublishParams(mandatory=True),
+            exchange_params=ExchangeParams("exchange_direct_wo_bound_queue"),
+        )
+        self.assertTrue(mandatory_error.wait(timeout=1.0))
 
 
 class TestCaching(unittest.TestCase):
