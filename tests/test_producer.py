@@ -18,6 +18,7 @@ from rabbitmq_client import (
 
 class TestPublishInterface(unittest.TestCase):
 
+    @patch("rabbitmq_client.producer.RMQProducer.start")
     def setUp(self) -> None:
         """Setup to run before each test case."""
         self.producer = RMQProducer()
