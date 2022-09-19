@@ -91,7 +91,7 @@ class TestAcknowledgements(unittest.TestCase):
         consume_ok = threading.Event()
         msg = threading.Event()
 
-        def on_msg(_body, ack=None):  # noqa
+        def on_msg(_body, ack=None, nack=None):  # noqa
             if isinstance(_body, ConsumeOK):
                 consume_ok.set()
             else:
@@ -117,7 +117,7 @@ class TestAcknowledgements(unittest.TestCase):
         consume_ok = threading.Event()
         msg = threading.Event()
 
-        def on_msg(_body, ack=None):  # noqa
+        def on_msg(_body, ack=None, nack=None):  # noqa
             if isinstance(_body, ConsumeOK):
                 consume_ok.set()
             else:
@@ -599,7 +599,7 @@ class TestConfirmMode(unittest.TestCase):
         msg_received = threading.Event()
         msg_content = None
 
-        def on_msg(msg, ack=None):
+        def on_msg(msg, ack=None, nack=None):
             if isinstance(msg, ConsumeOK):
                 consume_ok.set()
 
@@ -622,7 +622,7 @@ class TestConfirmMode(unittest.TestCase):
         self.assertTrue(consume_ok.wait(timeout=1.0))
 
         # Publish a mandatory message to the exchange and observe no returned
-        # messages since the a queue is bound to the exchange
+        # messages since then a queue is bound to the exchange
         publish_key = self.producer.publish(
             b"direct exchange body",
             publish_params=PublishParams(mandatory=True),
@@ -717,7 +717,7 @@ class TestCaching(unittest.TestCase):
         msg_gotten = Event()
         msg_content = ""
 
-        def on_queue_message(msg, ack=None):
+        def on_queue_message(msg, ack=None, nack=None):
             if isinstance(msg, ConsumeOK):
                 consume_ok.set()
 

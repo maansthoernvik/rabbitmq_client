@@ -314,6 +314,10 @@ class RMQConsumer(RMQConnection):
                     ack=lambda:
                         channel.basic_ack(
                             delivery_tag=basic_deliver.delivery_tag
+                        ),
+                    nack=lambda:
+                        channel.basic_nack(
+                            delivery_tag=basic_deliver.delivery_tag
                         )
                 )
             else:

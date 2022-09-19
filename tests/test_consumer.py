@@ -435,7 +435,7 @@ class TestConsumer(unittest.TestCase):
         # Prep
         on_message_callback_called = False
 
-        def on_message_callback(msg, ack=None):
+        def on_message_callback(msg, ack=None, nack=None):
             if not msg == b'body' or isinstance(msg, ConsumeOK):
                 return
 
@@ -505,7 +505,7 @@ class TestConsumer(unittest.TestCase):
     def test_manual_ack_consume(self):
         consumer_tag = self.set_up_confirmed_consume(auto_ack=False)
 
-        def on_msg(_msg, ack=None):
+        def on_msg(_msg, ack=None, nack=None):
             ack()
 
         consume = self.consumer._consumes.get(consumer_tag)
@@ -518,5 +518,23 @@ class TestConsumer(unittest.TestCase):
         ack_mock = Mock()
         channel_mock.basic_ack = ack_mock
         self.consumer.on_msg(channel_mock, basic_deliver, Mock(), b"body")
-
         ack_mock.assert_called_with(delivery_tag=123)
+
+    def test_manual_nack_consume(self):
+        consumer_tag = self.set_up_confirmed_consume(auto_ack=False)
+
+        def on_msg(_msg, ack=None, nack=None):
+            nack()
+
+        consume = self.consumer._consumes.get(consumer_tag)
+        consume.consume_params.on_message_callback = on_msg
+
+        basic_deliver = Mock()
+        basic_deliver.consumer_tag = consumer_tag
+        basic_deliver.delivery_tag = 123
+        channel_mock = Mock()
+        nack_mock = Mock()
+        channel_mock.basic_nack = nack_mock
+        self.consumer.on_msg(channel_mock, basic_deliver, Mock(), b"body")
+
+        nack_mock.assert_called_with(delivery_tag=123)
